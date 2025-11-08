@@ -1,0 +1,7 @@
+streamlit
+mesa
+numpy
+plotly
+pandas
+reportlab
+python-dotenv
