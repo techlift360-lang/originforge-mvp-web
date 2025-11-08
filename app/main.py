@@ -3,6 +3,11 @@ import plotly.graph_objects as go
 from app.world import World
 from app.utils import export_csv, export_pdf
 
+import streamlit as st
+import plotly.graph_objects as go
+from app.world import World
+from app.utils import export_csv, export_pdf
+
 st.set_page_config(page_title="OriginForge Policy Sandbox", layout="wide")
 st.title("🌍 OriginForge — Policy Sandbox (Web MVP)")
 
@@ -39,5 +44,8 @@ if st.button("▶️ Run Simulation"):
         st.metric("GDP (proxy)", f'{last["gdp"]:.1f}')
         st.metric("Inequality (Gini)", f'{last["gini_proxy"]:.3f}')
         st.metric("Stability", f'{last["stability"]:.3f}')
-        st.metric("Innovation", f'{last["innovation"]:.3f}')
-        st.metric("Emissions", f'{last["emissions"]:.3f}')
+        import streamlit as st
+import plotly.graph_objects as go
+from world import World
+from utils import export_csv, export_pdf
+
