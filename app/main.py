@@ -1,11 +1,12 @@
 import streamlit as st
 import plotly.graph_objects as go
 from world import World
-from utils import export_csv, export_pdf
+from utils import export_csv, export_pdf  # not used yet, but fine to keep
 
 st.set_page_config(page_title="OriginForge Policy Sandbox", layout="wide")
 st.title("🌍 OriginForge — Policy Sandbox (Web MVP)")
 
+# Sidebar controls
 with st.sidebar:
     st.header("Policy Controls")
     tax = st.slider("Tax Rate", 0.0, 0.50, 0.20, 0.01)
@@ -18,9 +19,17 @@ with st.sidebar:
 col1, col2 = st.columns([2, 1])
 
 if st.button("▶️ Run Simulation"):
-    world = World(tax_rate=tax, ubi_rate=ubi, education_spend=edu, resource_cap=cap, regime=regime)
+    # Run the world
+    world = World(
+        tax_rate=tax,
+        ubi_rate=ubi,
+        education_spend=edu,
+        resource_cap=cap,
+        regime=regime,
+    )
     df = world.run(ticks=int(ticks))
 
+    # --- Left: charts ---
     with col1:
         st.subheader("Metrics Over Time")
         fig = go.Figure()
@@ -32,6 +41,7 @@ if st.button("▶️ Run Simulation"):
         fig.update_layout(height=500, margin=dict(l=10, r=10, t=30, b=10))
         st.plotly_chart(fig, use_container_width=True)
 
+    # --- Right: summary metrics ---
     with col2:
         st.subheader("Summary")
         last = df.iloc[-1].to_dict()
@@ -41,3 +51,13 @@ if st.button("▶️ Run Simulation"):
         st.metric("Stability", f'{last["stability"]:.3f}')
         st.metric("Innovation", f'{last["innovation"]:.3f}')
         st.metric("Emissions", f'{last["emissions"]:.3f}')
+
+    # --- NEW: CSV download button ---
+    st.subheader("Exports")
+    csv_data = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="⬇️ Download data as CSV",
+        data=csv_data,
+        file_name="originforge_run.csv",
+        mime="text/csv",
+    )
