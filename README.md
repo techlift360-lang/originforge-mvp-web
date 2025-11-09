@@ -56,13 +56,6 @@ OriginForge makes them *tangible* — it turns policy ideas into visual feedback
 
 ---
 
-## 💻 Run Locally
-
-1. **Clone this repository**
-
-   ```bash
-   git clone https://github.com/<your-username>/originforge-mvp-web.git
-   cd originforge-mvp-web
 ---
 
 <p align="center">
