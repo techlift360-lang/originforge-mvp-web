@@ -295,9 +295,10 @@ def add_run_to_history(
 
 # Try to show the same banner as in the README, if available
 try:
-    st.image("assets/originforge-banner.png", use_column_width=True)
+    st.image("assets/originforge-banner.png", width=800)
 except Exception:
     pass
+
 
 header_left, header_right = st.columns([3, 1])
 
