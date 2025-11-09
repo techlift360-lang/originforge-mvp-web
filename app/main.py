@@ -243,10 +243,9 @@ with tab_compare:
         df_B_copy = df_B.copy()
         df_A_copy["scenario"] = scenario_A
         df_B_copy["scenario"] = scenario_B
-        df_combined = st.session_state.get(
-            "df_compare_combined", None
-        )  # not heavily used, but kept for clarity
-        df_combined = df_A_copy.append(df_B_copy, ignore_index=True)
+
+        # pandas >= 2.0: use concat instead of DataFrame.append
+        df_combined = pd.concat([df_A_copy, df_B_copy], ignore_index=True)
 
         st.subheader("Exports")
         csv_cmp = df_combined.to_csv(index=False).encode("utf-8")
