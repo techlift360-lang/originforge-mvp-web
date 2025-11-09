@@ -93,7 +93,6 @@ def clamp_int(value: Any, lo: int, hi: int, fallback: int) -> int:
         return fallback
     return max(lo, min(hi, x))
 
-
 @st.cache_data(show_spinner=False)
 def run_world_with_params_cached(
     tax: float,
@@ -109,25 +108,41 @@ def run_world_with_params_cached(
     """
     Cached simulation runner.
 
-    Same parameters + ticks + options -> instantly returns cached results.
+    Works with both:
+    - New World(...) that accepts num_agents
+    - Older World(...) that does not (fallback without error)
     """
     ticks = max(1, min(int(ticks), 5000))
     num_agents = max(50, min(int(num_agents), 5000))
 
-    world = World(
-        tax_rate=tax,
-        ubi_rate=ubi,
-        education_spend=edu,
-        resource_cap=cap,
-        regime=regime,
-        num_agents=num_agents,
-    )
+    # Try new signature first (with num_agents).
+    # If the deployed World class is older, silently fall back.
+    try:
+        world = World(
+            tax_rate=tax,
+            ubi_rate=ubi,
+            education_spend=edu,
+            resource_cap=cap,
+            regime=regime,
+            num_agents=num_agents,
+        )
+    except TypeError:
+        world = World(
+            tax_rate=tax,
+            ubi_rate=ubi,
+            education_spend=edu,
+            resource_cap=cap,
+            regime=regime,
+        )
+
     df = world.run(
         ticks=ticks,
         recession=recession,
         climate_shock=climate_shock,
     )
     return df
+
+
 
 
 def get_params_for_scenario(name: str, sliders: Dict[str, Any]) -> Dict[str, Any]:
