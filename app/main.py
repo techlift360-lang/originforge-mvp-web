@@ -18,6 +18,7 @@ Backed by:
 from __future__ import annotations
 
 import json
+import time
 from typing import Dict, Any, List, Optional
 
 import numpy as np
@@ -44,6 +45,10 @@ if "run_history" not in st.session_state:
 
 if "last_single_run" not in st.session_state:
     st.session_state["last_single_run"]: Optional[Dict[str, Any]] = None
+
+# Welcome panel flag (first visit)
+if "show_welcome" not in st.session_state:
+    st.session_state["show_welcome"] = True
 
 # ---------------------------
 # Preset Scenario Definitions
@@ -424,7 +429,7 @@ def recommend_next_steps(
             "Emissions are high. Explore **tightening the resource cap** and/or increasing "
             "education to see if innovation-driven green growth can offset the drag."
         )
-    elif emis < 1.5 and gdp is not None and gdp < 1500:
+    elif emis < 1.5 and gdp < 1500:
         recs.append(
             "Emissions are low but GDP is modest. It may be safe to **loosen the resource cap** a bit "
             "to see if you can gain growth without losing too much on the climate side."
@@ -583,7 +588,7 @@ with header_right:
     st.markdown(
         """
         <div style="text-align:right; font-size: 12px; color:#6B7280;">
-        v1.3 • Simulation sandbox (educational & exploratory)
+        v1.4 • Simulation sandbox (educational & exploratory)
         </div>
         """,
         unsafe_allow_html=True,
@@ -627,6 +632,24 @@ with c3:
     )
 
 st.markdown("")
+
+# Welcome panel (first visit only)
+if st.session_state.get("show_welcome", False):
+    with st.expander("🚀 Welcome to OriginForge! (click to hide)", expanded=True):
+        st.markdown(
+            """
+            **Get started in 3 steps:**
+
+            1. Go to **Single Scenario** and pick a preset or use **Custom (use sliders)**.  
+            2. Adjust **tax, UBI, education, and resource caps** in the left sidebar.  
+            3. Click **Run single scenario** to generate metrics, narrative, and exports.  
+
+            💡 *Example*: Try **High UBI Safety Net** with policy feedback ON and a climate shock, then compare it to **Low Tax / High Growth**.
+            """.strip()
+        )
+        if st.button("Got it! Hide welcome panel", key="dismiss_welcome"):
+            st.session_state["show_welcome"] = False
+            st.rerun()
 
 with st.expander("How the model works", expanded=False):
     st.markdown(
@@ -843,6 +866,15 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Could not load config: {e}")
 
+    st.markdown("---")
+    st.markdown("#### 🔄 Reset")
+
+    if st.button("Reset all to defaults"):
+        # Clear all session state keys and rerun
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+
 # ---------------------------
 # Tabs: Main Sections
 # ---------------------------
@@ -933,23 +965,37 @@ with tab_single:
     st.markdown("")
 
     if run_button:
-        with st.spinner("Running simulation..."):
-            try:
-                df = run_world_with_params_cached(
-                    params_single["tax"],
-                    params_single["ubi"],
-                    params_single["edu"],
-                    params_single["cap"],
-                    params_single["regime"],
-                    int(ticks),
-                    int(population_size),
-                    bool(enable_recession),
-                    bool(enable_climate_shock),
-                    bool(enable_policy_feedback),
-                )
-            except Exception as e:
-                st.error(f"An error occurred while running the simulation: {e}")
-                df = pd.DataFrame()
+        # Give a small, friendly progress bar feel while simulation runs
+        progress_col, _ = st.columns([1, 3])
+        with progress_col:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            steps = 5
+            for i in range(steps):
+                progress_bar.progress((i + 1) / steps)
+                status_text.text(f"Preparing simulation… ({i + 1}/{steps})")
+                time.sleep(0.08)
+
+        try:
+            df = run_world_with_params_cached(
+                params_single["tax"],
+                params_single["ubi"],
+                params_single["edu"],
+                params_single["cap"],
+                params_single["regime"],
+                int(ticks),
+                int(population_size),
+                bool(enable_recession),
+                bool(enable_climate_shock),
+                bool(enable_policy_feedback),
+            )
+        except Exception as e:
+            st.error(f"An error occurred while running the simulation: {e}")
+            df = pd.DataFrame()
+
+        # Clear progress visuals
+        progress_bar.empty()
+        status_text.empty()
 
         if not df.empty:
             add_run_to_history(
