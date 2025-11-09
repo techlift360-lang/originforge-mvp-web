@@ -4,7 +4,6 @@ import pandas as pd
 from world import World
 from utils import export_csv, export_pdf  # reserved for future PDF feature
 
-
 st.set_page_config(page_title="OriginForge Policy Sandbox", layout="wide")
 st.title("🌍 OriginForge — Policy Sandbox (Web MVP)")
 
@@ -36,7 +35,7 @@ SCENARIOS = {
 
 
 def run_world_with_params(params, ticks: int):
-    """Helper to run a world and return its dataframe + resolved params."""
+    """Helper to run a world and return its dataframe."""
     world = World(
         tax_rate=params["tax"],
         ubi_rate=params["ubi"],
@@ -49,9 +48,9 @@ def run_world_with_params(params, ticks: int):
 
 
 def get_params_for_scenario(name, sliders):
-    """Return (params_dict, label) given a scenario name and slider values."""
+    """Return params dict given a scenario name and slider values."""
     if SCENARIOS[name] is None:
-        # Custom
+        # Custom mode: use sliders
         return {
             "tax": sliders["tax"],
             "ubi": sliders["ubi"],
@@ -61,6 +60,52 @@ def get_params_for_scenario(name, sliders):
         }
     else:
         return SCENARIOS[name]
+
+
+def describe_single_run(df: pd.DataFrame) -> str:
+    """Create a simple human-readable summary for a single scenario run."""
+    if df.empty:
+        return "No data to summarize."
+
+    first = df.iloc[0]
+    last = df.iloc[-1]
+
+    def pct_change(new, old):
+        if old == 0:
+            return 0.0
+        return 100.0 * (new - old) / abs(old)
+
+    gdp_change = pct_change(last["gdp"], first["gdp"])
+    gini_change = pct_change(last["gini_proxy"], first["gini_proxy"])
+    stab_change = pct_change(last["stability"], first["stability"])
+
+    lines = []
+
+    # GDP
+    if gdp_change > 2:
+        lines.append(f"• GDP grew by about **{gdp_change:.1f}%** over the simulation.")
+    elif gdp_change < -2:
+        lines.append(f"• GDP decreased by about **{abs(gdp_change):.1f}%** over the simulation.")
+    else:
+        lines.append("• GDP stayed relatively **stable** over the simulation.")
+
+    # Inequality (Gini)
+    if gini_change < -1:
+        lines.append(f"• Inequality (Gini) **decreased** by roughly {abs(gini_change):.1f}%.")
+    elif gini_change > 1:
+        lines.append(f"• Inequality (Gini) **increased** by roughly {gini_change:.1f}%.")
+    else:
+        lines.append("• Inequality (Gini) remained **roughly constant**.")
+
+    # Stability
+    if stab_change > 2:
+        lines.append(f"• Social stability **improved**, rising by about {stab_change:.1f}%.")
+    elif stab_change < -2:
+        lines.append(f"• Social stability **declined**, falling by about {abs(stab_change):.1f}%.")
+    else:
+        lines.append("• Social stability stayed **fairly stable**.")
+
+    return "\n".join(lines)
 
 
 # --- UI: Tabs ---
@@ -88,7 +133,14 @@ with tab_single:
         edu = st.slider("Education Spend (GDP share)", 0.0, 0.10, 0.05, 0.01, key="single_edu")
         cap = st.slider("Resource Cap (reduction)", 0.0, 0.40, 0.20, 0.01, key="single_cap")
         regime = st.selectbox("Regime", ["democracy", "autocracy"], key="single_regime")
-        ticks = st.number_input("Simulation Ticks", min_value=50, max_value=2000, value=200, step=50, key="single_ticks")
+        ticks = st.number_input(
+            "Simulation Ticks",
+            min_value=50,
+            max_value=2000,
+            value=200,
+            step=50,
+            key="single_ticks",
+        )
 
     sliders_single = {
         "tax": tax,
@@ -140,6 +192,10 @@ with tab_single:
             st.metric("Stability", f'{last["stability"]:.3f}')
             st.metric("Innovation", f'{last["innovation"]:.3f}')
             st.metric("Emissions", f'{last["emissions"]:.3f}')
+
+        # --- NEW: Textual insight ---
+        st.markdown("### Quick Insight (Single Scenario)")
+        st.markdown(describe_single_run(df))
 
         # --- CSV download ---
         st.subheader("Exports")
@@ -193,7 +249,7 @@ with tab_compare:
         df_A = run_world_with_params(params_A, ticks_cmp)
         df_B = run_world_with_params(params_B, ticks_cmp)
 
-        # GDP + Inequality comparison chart
+        # GDP comparison
         st.markdown("### GDP Comparison")
         fig_gdp = go.Figure()
         fig_gdp.add_trace(go.Scatter(x=df_A["tick"], y=df_A["gdp"], name=f"GDP – {scenario_A}"))
@@ -201,6 +257,7 @@ with tab_compare:
         fig_gdp.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10))
         st.plotly_chart(fig_gdp, use_container_width=True)
 
+        # Gini comparison
         st.markdown("### Inequality (Gini) Comparison")
         fig_gini = go.Figure()
         fig_gini.add_trace(go.Scatter(x=df_A["tick"], y=df_A["gini_proxy"], name=f"Gini – {scenario_A}"))
@@ -243,8 +300,6 @@ with tab_compare:
         df_B_copy = df_B.copy()
         df_A_copy["scenario"] = scenario_A
         df_B_copy["scenario"] = scenario_B
-
-        # pandas >= 2.0: use concat instead of DataFrame.append
         df_combined = pd.concat([df_A_copy, df_B_copy], ignore_index=True)
 
         st.subheader("Exports")
