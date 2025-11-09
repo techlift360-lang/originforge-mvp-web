@@ -74,6 +74,24 @@ SCENARIOS: Dict[str, Optional[Dict[str, Any]]] = {
 # Helper Functions
 # ---------------------------
 
+def clamp_float(value: Any, lo: float, hi: float, fallback: float) -> float:
+    """Convert to float and clamp to [lo, hi]; fallback on error."""
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(lo, min(hi, x))
+
+
+def clamp_int(value: Any, lo: int, hi: int, fallback: int) -> int:
+    """Convert to int and clamp to [lo, hi]; fallback on error."""
+    try:
+        x = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(lo, min(hi, x))
+
+
 @st.cache_data(show_spinner=False)
 def run_world_with_params_cached(
     tax: float,
@@ -107,7 +125,7 @@ def get_params_for_scenario(name: str, sliders: Dict[str, Any]) -> Dict[str, Any
     Resolve the effective parameters, either from a preset scenario
     or from the current slider values (Custom mode).
     """
-    if SCENARIOS[name] is None:
+    if SCENARIOS.get(name) is None:
         # Custom mode: use sliders
         return {
             "tax": float(sliders["tax"]),
@@ -437,20 +455,35 @@ with st.sidebar:
             if not isinstance(loaded_cfg, dict):
                 raise ValueError("Config must be a JSON object.")
 
-            st.session_state["single_scenario"] = loaded_cfg.get(
-                "scenario", scenario_preset
+            loaded_scenario = loaded_cfg.get("scenario", scenario_preset)
+            if loaded_scenario not in SCENARIOS:
+                st.warning(
+                    "Scenario name in config is not recognized. "
+                    "Falling back to 'Custom (use sliders)'."
+                )
+                loaded_scenario = "Custom (use sliders)"
+
+            st.session_state["single_scenario"] = loaded_scenario
+
+            st.session_state["single_tax"] = clamp_float(
+                loaded_cfg.get("tax", tax), 0.0, 0.5, float(tax)
             )
-            st.session_state["single_tax"] = float(loaded_cfg.get("tax", tax))
-            st.session_state["single_ubi"] = float(loaded_cfg.get("ubi", ubi))
-            st.session_state["single_edu"] = float(loaded_cfg.get("edu", edu))
-            st.session_state["single_cap"] = float(loaded_cfg.get("cap", cap))
+            st.session_state["single_ubi"] = clamp_float(
+                loaded_cfg.get("ubi", ubi), 0.0, 0.3, float(ubi)
+            )
+            st.session_state["single_edu"] = clamp_float(
+                loaded_cfg.get("edu", edu), 0.0, 0.1, float(edu)
+            )
+            st.session_state["single_cap"] = clamp_float(
+                loaded_cfg.get("cap", cap), 0.0, 0.4, float(cap)
+            )
             st.session_state["single_regime"] = str(
                 loaded_cfg.get("regime", regime)
             )
-            st.session_state["single_ticks"] = int(
-                loaded_cfg.get("ticks", ticks)
+            st.session_state["single_ticks"] = clamp_int(
+                loaded_cfg.get("ticks", ticks), 50, 5000, int(ticks)
             )
-            st.success("Config loaded. Sliders will reflect values on next rerun.")
+            st.success("Config loaded. Sliders and preset will update on next rerun.")
         except Exception as e:
             st.error(f"Could not load config: {e}")
 
@@ -481,6 +514,15 @@ with tab_single:
         "regime": regime,
     }
     params_single = get_params_for_scenario(scenario_preset, sliders_single)
+
+    # Clarify whether sliders are in effect
+    if scenario_preset == "Custom (use sliders)":
+        st.info("Custom mode: the policy sliders in the left sidebar define this scenario.")
+    else:
+        st.info(
+            f"Preset mode: using **{scenario_preset}**. "
+            "Policy sliders are ignored for this run."
+        )
 
     col1, col2 = st.columns([2.2, 1.0])
 
@@ -728,7 +770,11 @@ with tab_compare:
             st.markdown("### Quick comparison insight")
             insight_lines: List[str] = []
 
-            if gdp_diff > 0:
+            if abs(gdp_diff) < 1e-6:
+                insight_lines.append(
+                    f"**{scenario_A}** and **{scenario_B}** end with very similar GDP levels."
+                )
+            elif gdp_diff > 0:
                 insight_lines.append(
                     f"**{scenario_B}** ends with **higher GDP** than **{scenario_A}** "
                     f"by {gdp_diff:,.1f} units."
@@ -739,7 +785,11 @@ with tab_compare:
                     f"by {abs(gdp_diff):,.1f} units."
                 )
 
-            if gini_diff > 0:
+            if abs(gini_diff) < 1e-6:
+                insight_lines.append(
+                    f"Inequality (Gini) is also very similar between **{scenario_A}** and **{scenario_B}**."
+                )
+            elif gini_diff > 0:
                 insight_lines.append(
                     f"**{scenario_B}** ends with **higher inequality (Gini)** than "
                     f"**{scenario_A}** by {gini_diff:.3f}."
