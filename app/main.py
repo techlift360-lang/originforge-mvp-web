@@ -1,7 +1,7 @@
 import streamlit as st
 import plotly.graph_objects as go
 from world import World
-from utils import export_csv, export_pdf  # PDF not used yet, but kept for future
+from utils import export_csv, export_pdf  # reserved for future PDF feature
 
 st.set_page_config(page_title="OriginForge Policy Sandbox", layout="wide")
 st.title("🌍 OriginForge — Policy Sandbox (Web MVP)")
@@ -32,98 +32,225 @@ SCENARIOS = {
     },
 }
 
-# Sidebar controls
-with st.sidebar:
-    st.header("Policy Controls")
 
-    scenario = st.selectbox(
-        "Scenario",
-        list(SCENARIOS.keys()),
-        help="Choose a preset, or select 'Custom' to use the sliders below.",
-    )
-
-    st.markdown("**Manual Sliders (used only in Custom mode)**")
-
-    tax = st.slider("Tax Rate", 0.0, 0.50, 0.20, 0.01)
-    ubi = st.slider("UBI (as fraction of median income)", 0.0, 0.30, 0.10, 0.01)
-    edu = st.slider("Education Spend (GDP share)", 0.0, 0.10, 0.05, 0.01)
-    cap = st.slider("Resource Cap (reduction)", 0.0, 0.40, 0.20, 0.01)
-    regime = st.selectbox("Regime", ["democracy", "autocracy"])
-    ticks = st.number_input("Simulation Ticks", min_value=50, max_value=2000, value=200, step=50)
-
-# Decide which parameters to actually use
-if SCENARIOS[scenario] is None:
-    # Custom mode: use sliders
-    used_tax = tax
-    used_ubi = ubi
-    used_edu = edu
-    used_cap = cap
-    used_regime = regime
-else:
-    # Preset mode: override sliders
-    preset = SCENARIOS[scenario]
-    used_tax = preset["tax"]
-    used_ubi = preset["ubi"]
-    used_edu = preset["edu"]
-    used_cap = preset["cap"]
-    used_regime = preset["regime"]
-
-col1, col2 = st.columns([2, 1])
-
-if st.button("▶️ Run Simulation"):
-    # Run the world with the chosen parameters
+def run_world_with_params(params, ticks: int):
+    """Helper to run a world and return its dataframe + resolved params."""
     world = World(
-        tax_rate=used_tax,
-        ubi_rate=used_ubi,
-        education_spend=used_edu,
-        resource_cap=used_cap,
-        regime=used_regime,
+        tax_rate=params["tax"],
+        ubi_rate=params["ubi"],
+        education_spend=params["edu"],
+        resource_cap=params["cap"],
+        regime=params["regime"],
     )
     df = world.run(ticks=int(ticks))
+    return df
 
-    # --- Left: charts ---
-    with col1:
-        st.subheader("Metrics Over Time")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df["tick"], y=df["gdp"], name="GDP"))
-        fig.add_trace(go.Scatter(x=df["tick"], y=df["gini_proxy"], name="Inequality (Gini proxy)"))
-        fig.add_trace(go.Scatter(x=df["tick"], y=df["stability"], name="Stability"))
-        fig.add_trace(go.Scatter(x=df["tick"], y=df["innovation"], name="Innovation"))
-        fig.add_trace(go.Scatter(x=df["tick"], y=df["emissions"], name="Emissions"))
-        fig.update_layout(height=500, margin=dict(l=10, r=10, t=30, b=10))
-        st.plotly_chart(fig, use_container_width=True)
 
-        # Show which parameters were actually used
-        st.markdown("### Parameters Used")
-        st.write(
-            {
-                "Scenario": scenario,
-                "Tax rate": round(used_tax, 3),
-                "UBI (fraction)": round(used_ubi, 3),
-                "Education (GDP share)": round(used_edu, 3),
-                "Resource cap": round(used_cap, 3),
-                "Regime": used_regime,
-                "Ticks": int(ticks),
-            }
+def get_params_for_scenario(name, sliders):
+    """Return (params_dict, label) given a scenario name and slider values."""
+    if SCENARIOS[name] is None:
+        # Custom
+        return {
+            "tax": sliders["tax"],
+            "ubi": sliders["ubi"],
+            "edu": sliders["edu"],
+            "cap": sliders["cap"],
+            "regime": sliders["regime"],
+        }
+    else:
+        return SCENARIOS[name]
+
+
+# --- UI: Tabs ---
+tab_single, tab_compare = st.tabs(["Single Scenario", "Compare Scenarios"])
+
+# ==============
+# TAB 1: SINGLE
+# ==============
+with tab_single:
+    # Sidebar controls for single scenario
+    with st.sidebar:
+        st.header("Policy Controls (Single Scenario)")
+
+        scenario = st.selectbox(
+            "Scenario",
+            list(SCENARIOS.keys()),
+            help="Choose a preset, or select 'Custom' to use the sliders below.",
+            key="single_scenario",
         )
 
-    # --- Right: summary metrics ---
-    with col2:
-        st.subheader("Summary")
-        last = df.iloc[-1].to_dict()
-        st.metric("Population", f'{int(last["population"])}')
-        st.metric("GDP (proxy)", f'{last["gdp"]:.1f}')
-        st.metric("Inequality (Gini)", f'{last["gini_proxy"]:.3f}')
-        st.metric("Stability", f'{last["stability"]:.3f}')
-        st.metric("Innovation", f'{last["innovation"]:.3f}')
-        st.metric("Emissions", f'{last["emissions"]:.3f}')
+        st.markdown("**Manual Sliders (used only in Custom mode)**")
 
-    # --- CSV download ---
-    st.subheader("Exports")
-    csv_data = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="⬇️ Download data as CSV",
-        data=csv_data,
-        file_name="originforge_run.csv",
-        mime="text/csv",
+        tax = st.slider("Tax Rate", 0.0, 0.50, 0.20, 0.01, key="single_tax")
+        ubi = st.slider("UBI (fraction of median income)", 0.0, 0.30, 0.10, 0.01, key="single_ubi")
+        edu = st.slider("Education Spend (GDP share)", 0.0, 0.10, 0.05, 0.01, key="single_edu")
+        cap = st.slider("Resource Cap (reduction)", 0.0, 0.40, 0.20, 0.01, key="single_cap")
+        regime = st.selectbox("Regime", ["democracy", "autocracy"], key="single_regime")
+        ticks = st.number_input("Simulation Ticks", min_value=50, max_value=2000, value=200, step=50, key="single_ticks")
+
+    sliders_single = {
+        "tax": tax,
+        "ubi": ubi,
+        "edu": edu,
+        "cap": cap,
+        "regime": regime,
+    }
+
+    params_single = get_params_for_scenario(scenario, sliders_single)
+
+    col1, col2 = st.columns([2, 1])
+
+    if st.button("▶️ Run Single Scenario"):
+        df = run_world_with_params(params_single, ticks)
+
+        # --- Left: charts ---
+        with col1:
+            st.subheader("Metrics Over Time")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df["tick"], y=df["gdp"], name="GDP"))
+            fig.add_trace(go.Scatter(x=df["tick"], y=df["gini_proxy"], name="Inequality (Gini proxy)"))
+            fig.add_trace(go.Scatter(x=df["tick"], y=df["stability"], name="Stability"))
+            fig.add_trace(go.Scatter(x=df["tick"], y=df["innovation"], name="Innovation"))
+            fig.add_trace(go.Scatter(x=df["tick"], y=df["emissions"], name="Emissions"))
+            fig.update_layout(height=500, margin=dict(l=10, r=10, t=30, b=10))
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("### Parameters Used")
+            st.write(
+                {
+                    "Scenario": scenario,
+                    "Tax rate": round(params_single["tax"], 3),
+                    "UBI (fraction)": round(params_single["ubi"], 3),
+                    "Education (GDP share)": round(params_single["edu"], 3),
+                    "Resource cap": round(params_single["cap"], 3),
+                    "Regime": params_single["regime"],
+                    "Ticks": int(ticks),
+                }
+            )
+
+        # --- Right: summary metrics ---
+        with col2:
+            st.subheader("Summary")
+            last = df.iloc[-1].to_dict()
+            st.metric("Population", f'{int(last["population"])}')
+            st.metric("GDP (proxy)", f'{last["gdp"]:.1f}')
+            st.metric("Inequality (Gini)", f'{last["gini_proxy"]:.3f}')
+            st.metric("Stability", f'{last["stability"]:.3f}')
+            st.metric("Innovation", f'{last["innovation"]:.3f}')
+            st.metric("Emissions", f'{last["emissions"]:.3f}')
+
+        # --- CSV download ---
+        st.subheader("Exports")
+        csv_data = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="⬇️ Download data as CSV",
+            data=csv_data,
+            file_name="originforge_single_run.csv",
+            mime="text/csv",
+        )
+
+# ===================
+# TAB 2: COMPARISON
+# ===================
+with tab_compare:
+    st.subheader("Compare Two Policy Scenarios")
+
+    colA, colB = st.columns(2)
+
+    with colA:
+        scenario_A = st.selectbox(
+            "Scenario A",
+            [k for k in SCENARIOS.keys() if k != "Custom (use sliders)"],
+            index=0,
+            key="scenario_A",
+        )
+
+    with colB:
+        scenario_B = st.selectbox(
+            "Scenario B",
+            [k for k in SCENARIOS.keys() if k != "Custom (use sliders)"],
+            index=1,
+            key="scenario_B",
+        )
+
+    ticks_cmp = st.number_input(
+        "Simulation Ticks (for both scenarios)",
+        min_value=50,
+        max_value=2000,
+        value=300,
+        step=50,
+        key="compare_ticks",
     )
+
+    if st.button("▶️ Run Comparison"):
+        # Prepare params
+        params_A = SCENARIOS[scenario_A]
+        params_B = SCENARIOS[scenario_B]
+
+        # Run worlds
+        df_A = run_world_with_params(params_A, ticks_cmp)
+        df_B = run_world_with_params(params_B, ticks_cmp)
+
+        # GDP + Inequality comparison chart
+        st.markdown("### GDP Comparison")
+        fig_gdp = go.Figure()
+        fig_gdp.add_trace(go.Scatter(x=df_A["tick"], y=df_A["gdp"], name=f"GDP – {scenario_A}"))
+        fig_gdp.add_trace(go.Scatter(x=df_B["tick"], y=df_B["gdp"], name=f"GDP – {scenario_B}"))
+        fig_gdp.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10))
+        st.plotly_chart(fig_gdp, use_container_width=True)
+
+        st.markdown("### Inequality (Gini) Comparison")
+        fig_gini = go.Figure()
+        fig_gini.add_trace(go.Scatter(x=df_A["tick"], y=df_A["gini_proxy"], name=f"Gini – {scenario_A}"))
+        fig_gini.add_trace(go.Scatter(x=df_B["tick"], y=df_B["gini_proxy"], name=f"Gini – {scenario_B}"))
+        fig_gini.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10))
+        st.plotly_chart(fig_gini, use_container_width=True)
+
+        # Simple text insight
+        last_A = df_A.iloc[-1]
+        last_B = df_B.iloc[-1]
+
+        gdp_diff = last_B["gdp"] - last_A["gdp"]
+        gini_diff = last_B["gini_proxy"] - last_A["gini_proxy"]
+
+        st.markdown("### Quick Insight")
+        insight_lines = []
+
+        if gdp_diff > 0:
+            insight_lines.append(
+                f"**{scenario_B}** ends with **higher GDP** than **{scenario_A}** by {gdp_diff:,.1f} units."
+            )
+        else:
+            insight_lines.append(
+                f"**{scenario_A}** ends with **higher GDP** than **{scenario_B}** by {abs(gdp_diff):,.1f} units."
+            )
+
+        if gini_diff > 0:
+            insight_lines.append(
+                f"**{scenario_B}** ends with **higher inequality (Gini)** than **{scenario_A}** by {gini_diff:.3f}."
+            )
+        else:
+            insight_lines.append(
+                f"**{scenario_A}** ends with **higher inequality (Gini)** than **{scenario_B}** by {abs(gini_diff):.3f}."
+            )
+
+        st.write("\n\n".join(insight_lines))
+
+        # Combined CSV export
+        df_A_copy = df_A.copy()
+        df_B_copy = df_B.copy()
+        df_A_copy["scenario"] = scenario_A
+        df_B_copy["scenario"] = scenario_B
+        df_combined = st.session_state.get(
+            "df_compare_combined", None
+        )  # not heavily used, but kept for clarity
+        df_combined = df_A_copy.append(df_B_copy, ignore_index=True)
+
+        st.subheader("Exports")
+        csv_cmp = df_combined.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="⬇️ Download comparison data as CSV",
+            data=csv_cmp,
+            file_name="originforge_comparison_run.csv",
+            mime="text/csv",
+        )
