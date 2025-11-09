@@ -9,6 +9,8 @@ This is a stylized, toy model of a "world" with:
 - Policy levers: tax_rate, ubi_rate, education_spend, resource_cap, regime
 - Optional shocks: recession, climate_shock
 - Optional policy feedback: government adapts policies over time
+- Sectoral GDP: industry, services, green
+- A simple "memory" / frustration index
 
 It is designed for:
 - Educational use
@@ -70,6 +72,11 @@ class World:
         self.stability = 0.7
         self.innovation = 0.3
         self.emissions = 1.0
+
+        # Sectoral GDP decomposition (proxies)
+        self.gdp_industry = self.gdp * 0.4
+        self.gdp_services = self.gdp * 0.4
+        self.gdp_green = self.gdp * 0.2
 
         # A simple "memory" / frustration index (0–1)
         # Higher when inequality is high and stability is low
@@ -229,6 +236,45 @@ class World:
         cfg.education_spend = float(max(0.0, min(cfg.education_spend, 0.10)))
         cfg.resource_cap = float(max(0.0, min(cfg.resource_cap, 0.40)))
 
+    def _update_sectors(self) -> None:
+        """
+        Update sectoral GDP (industry, services, green) based on current
+        GDP, innovation, resource caps, and stability.
+
+        This is a stylized decomposition; sums back to total GDP.
+        """
+        if self.gdp <= 0:
+            self.gdp_industry = 0.0
+            self.gdp_services = 0.0
+            self.gdp_green = 0.0
+            return
+
+        # Baseline shares
+        base_ind = 0.40
+        base_serv = 0.40
+        base_green = 0.20
+
+        # Adjustments:
+        # - Higher resource caps + innovation favor green sector
+        # - Strong stability + education (proxied by innovation) support services
+        # - Looser caps and lower innovation favor industry
+        cap = self.config.resource_cap
+        innov = self.innovation
+        stab = self.stability
+
+        share_green = base_green + 0.10 * innov + 0.08 * cap
+        share_ind = base_ind + 0.06 * (1.0 - cap) - 0.04 * innov
+        share_serv = base_serv + 0.05 * stab + 0.02 * innov
+
+        # Normalize to sum to 1 and avoid negatives
+        shares = np.array([share_ind, share_serv, share_green])
+        shares = np.maximum(shares, 0.02)  # avoid zeros/negatives
+        shares = shares / shares.sum()
+
+        self.gdp_industry = float(self.gdp * shares[0])
+        self.gdp_services = float(self.gdp * shares[1])
+        self.gdp_green = float(self.gdp * shares[2])
+
     # ------------------------------------------------------------------ #
     # Public API
     # ------------------------------------------------------------------ #
@@ -283,7 +329,10 @@ class World:
             if adapt_policies:
                 self._adapt_policies(gdp_growth_real)
 
-            # 5) Record snapshot, including current policy settings
+            # 5) Sectoral decomposition
+            self._update_sectors()
+
+            # 6) Record snapshot, including current policy settings and sectors
             records.append(
                 {
                     "tick": t,
@@ -298,6 +347,9 @@ class World:
                     "education_spend": float(self.config.education_spend),
                     "resource_cap": float(self.config.resource_cap),
                     "frustration": float(self.frustration),
+                    "gdp_industry": float(self.gdp_industry),
+                    "gdp_services": float(self.gdp_services),
+                    "gdp_green": float(self.gdp_green),
                 }
             )
 
