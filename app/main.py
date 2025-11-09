@@ -6,6 +6,7 @@ This module defines the full Streamlit app for:
 - Scenario comparison (A vs B)
 - Run history (session)
 - Developer view (JSON payload for the last single run)
+- Distributions view (synthetic income & stability distributions)
 
 Backed by:
 - world.World            -> simulation engine
@@ -17,9 +18,10 @@ from __future__ import annotations
 import json
 from typing import Dict, Any, List, Optional
 
-import streamlit as st
-import plotly.graph_objects as go
+import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
 
 from world import World
 from utils import export_pdf_bytes
@@ -100,14 +102,17 @@ def run_world_with_params_cached(
     cap: float,
     regime: str,
     ticks: int,
+    num_agents: int,
+    recession: bool,
+    climate_shock: bool,
 ) -> pd.DataFrame:
     """
     Cached simulation runner.
 
-    Same parameters + ticks -> instantly returns cached results.
+    Same parameters + ticks + options -> instantly returns cached results.
     """
-    # Basic safety guard
     ticks = max(1, min(int(ticks), 5000))
+    num_agents = max(50, min(int(num_agents), 5000))
 
     world = World(
         tax_rate=tax,
@@ -115,8 +120,13 @@ def run_world_with_params_cached(
         education_spend=edu,
         resource_cap=cap,
         regime=regime,
+        num_agents=num_agents,
     )
-    df = world.run(ticks=ticks)
+    df = world.run(
+        ticks=ticks,
+        recession=recession,
+        climate_shock=climate_shock,
+    )
     return df
 
 
@@ -194,6 +204,7 @@ def build_policy_brief_lines(
     ticks: int,
     df: pd.DataFrame,
     insight_md: str,
+    num_agents: int,
 ) -> List[str]:
     """
     Convert run info + insight into a list of plain-text lines for PDF export.
@@ -201,6 +212,7 @@ def build_policy_brief_lines(
     lines: List[str] = []
     lines.append(f"Scenario: {scenario_name}")
     lines.append(f"Ticks simulated: {int(ticks)}")
+    lines.append(f"Population (agents): {int(num_agents)}")
     lines.append("")
     lines.append("Policy Parameters:")
     lines.append(f"- Tax rate: {params['tax']:.3f}")
@@ -224,7 +236,6 @@ def build_policy_brief_lines(
         lines.append("")
 
     lines.append("Quick Insight:")
-    # Convert markdown bullets to plain text for PDF
     for line in insight_md.splitlines():
         plain = line.replace("• ", "- ").replace("**", "")
         lines.append(plain)
@@ -232,7 +243,12 @@ def build_policy_brief_lines(
     return lines
 
 
-def add_run_to_history(name: str, params: Dict[str, Any], df: pd.DataFrame) -> None:
+def add_run_to_history(
+    name: str,
+    params: Dict[str, Any],
+    df: pd.DataFrame,
+    num_agents: int,
+) -> None:
     """
     Store a compact summary of the run in session history.
     """
@@ -244,6 +260,7 @@ def add_run_to_history(name: str, params: Dict[str, Any], df: pd.DataFrame) -> N
         0,
         {
             "Scenario name": name,
+            "Population": int(num_agents),
             "Tax": round(params["tax"], 3),
             "UBI": round(params["ubi"], 3),
             "Edu": round(params["edu"], 3),
@@ -254,13 +271,18 @@ def add_run_to_history(name: str, params: Dict[str, Any], df: pd.DataFrame) -> N
             "Final Stability": round(float(last["stability"]), 3),
         },
     )
-    # keep only last 10
     st.session_state["run_history"] = st.session_state["run_history"][:10]
 
 
 # ---------------------------
 # Header & Intro Section
 # ---------------------------
+
+# Try to show the same banner as in the README, if available
+try:
+    st.image("assets/originforge-banner.png", use_column_width=True)
+except Exception:
+    pass
 
 header_left, header_right = st.columns([3, 1])
 
@@ -279,7 +301,7 @@ with header_right:
     st.markdown(
         """
         <div style="text-align:right; font-size: 12px; color:#6B7280;">
-        v1.0 • Simulation sandbox (educational & exploratory)
+        v1.1 • Simulation sandbox (educational & exploratory)
         </div>
         """,
         unsafe_allow_html=True,
@@ -287,7 +309,6 @@ with header_right:
 
 st.markdown("")
 
-# Quick 3-step cards
 c1, c2, c3 = st.columns(3)
 with c1:
     st.markdown(
@@ -328,19 +349,18 @@ st.markdown("")
 with st.expander("How the model works", expanded=False):
     st.markdown(
         """
-        - The world contains households, firms, and a government.  
+        - The world contains a stylized population, firms, and a government.  
         - Policies influence income, redistribution, innovation, emissions, and stability.  
-        - Each **tick** represents a time step (e.g., month or year) where agents interact.  
-        - Metrics are proxies, calibrated for exploration and teaching rather than precise forecasts.
+        - Each **tick** represents a time step where the system evolves.  
+        - Metrics are proxies, calibrated for exploration rather than precise forecasts.
         """.strip()
     )
 
 with st.expander("About & disclaimer", expanded=False):
     st.markdown(
         """
-        **OriginForge** is a policy *sandbox* that models a simplified virtual economy.  
-        It is designed for **education, experimentation, and scenario exploration** —  
-        not as a precise forecast of any specific real-world country.
+        **OriginForge** is a policy *sandbox* for educational and exploratory use.  
+        It is *not* a calibrated forecast model for any specific country or real-world policy decision.
         """.strip()
     )
 
@@ -422,6 +442,32 @@ with st.sidebar:
         key="single_ticks",
     )
 
+    population_size = st.number_input(
+        "Population size (agents)",
+        min_value=100,
+        max_value=5000,
+        value=500,
+        step=100,
+        help="Larger populations are more realistic but slower to simulate.",
+        key="population_size",
+    )
+
+    st.markdown("#### Shocks (optional)")
+
+    enable_recession = st.checkbox(
+        "Mid-run economic recession",
+        value=False,
+        help="At halfway through the simulation, GDP and stability take a temporary hit.",
+        key="enable_recession",
+    )
+
+    enable_climate_shock = st.checkbox(
+        "Late climate shock",
+        value=False,
+        help="Near the end of the run, emissions spike and stability suffers.",
+        key="enable_climate_shock",
+    )
+
     st.markdown("---")
     st.markdown("#### 💾 Save / Load config")
 
@@ -434,6 +480,9 @@ with st.sidebar:
         "cap": cap,
         "regime": regime,
         "ticks": int(ticks),
+        "population_size": int(population_size),
+        "enable_recession": bool(enable_recession),
+        "enable_climate_shock": bool(enable_climate_shock),
     }
     config_bytes = json.dumps(current_config, indent=2).encode("utf-8")
     st.download_button(
@@ -451,7 +500,6 @@ with st.sidebar:
     if uploaded is not None:
         try:
             loaded_cfg = json.loads(uploaded.read().decode("utf-8"))
-            # minimal validation
             if not isinstance(loaded_cfg, dict):
                 raise ValueError("Config must be a JSON object.")
 
@@ -483,7 +531,19 @@ with st.sidebar:
             st.session_state["single_ticks"] = clamp_int(
                 loaded_cfg.get("ticks", ticks), 50, 5000, int(ticks)
             )
-            st.success("Config loaded. Sliders and preset will update on next rerun.")
+            st.session_state["population_size"] = clamp_int(
+                loaded_cfg.get("population_size", population_size),
+                100,
+                5000,
+                int(population_size),
+            )
+            st.session_state["enable_recession"] = bool(
+                loaded_cfg.get("enable_recession", enable_recession)
+            )
+            st.session_state["enable_climate_shock"] = bool(
+                loaded_cfg.get("enable_climate_shock", enable_climate_shock)
+            )
+            st.success("Config loaded. Controls will update on next rerun.")
         except Exception as e:
             st.error(f"Could not load config: {e}")
 
@@ -491,8 +551,8 @@ with st.sidebar:
 # Tabs: Main Sections
 # ---------------------------
 
-tab_single, tab_compare, tab_history, tab_dev = st.tabs(
-    ["Single Scenario", "Compare Scenarios", "Run History", "Developer View"]
+tab_single, tab_compare, tab_history, tab_dev, tab_dist = st.tabs(
+    ["Single Scenario", "Compare Scenarios", "Run History", "Developer View", "Distributions"]
 )
 
 # ==============
@@ -502,7 +562,7 @@ with tab_single:
     st.markdown(
         """
         #### 🎯 Single Scenario  
-        Configure a single policy setup and see how the virtual society evolves over time.
+        Configure one policy setup and see how the virtual society evolves over time.
         """.strip()
     )
 
@@ -515,7 +575,6 @@ with tab_single:
     }
     params_single = get_params_for_scenario(scenario_preset, sliders_single)
 
-    # Clarify whether sliders are in effect
     if scenario_preset == "Custom (use sliders)":
         st.info("Custom mode: the policy sliders in the left sidebar define this scenario.")
     else:
@@ -539,21 +598,31 @@ with tab_single:
                     params_single["cap"],
                     params_single["regime"],
                     int(ticks),
+                    int(population_size),
+                    bool(enable_recession),
+                    bool(enable_climate_shock),
                 )
             except Exception as e:
                 st.error(f"An error occurred while running the simulation: {e}")
                 df = pd.DataFrame()
 
         if not df.empty:
-            add_run_to_history(scenario_name_input, params_single, df)
+            add_run_to_history(
+                scenario_name_input,
+                params_single,
+                df,
+                int(population_size),
+            )
             st.session_state["last_single_run"] = {
                 "name": scenario_name_input,
                 "params": params_single,
                 "ticks": int(ticks),
                 "df": df,
+                "population_size": int(population_size),
+                "enable_recession": bool(enable_recession),
+                "enable_climate_shock": bool(enable_climate_shock),
             }
 
-            # --- Left: charts & details ---
             with col1:
                 st.subheader("Metrics over time")
 
@@ -575,6 +644,24 @@ with tab_single:
                 fig.add_trace(
                     go.Scatter(x=df["tick"], y=df["emissions"], name="Emissions")
                 )
+
+                if enable_recession:
+                    fig.add_vline(
+                        x=int(ticks) // 2,
+                        line_dash="dash",
+                        line_color="orange",
+                        annotation_text="Recession",
+                        annotation_position="top left",
+                    )
+                if enable_climate_shock:
+                    fig.add_vline(
+                        x=int(int(ticks) * 0.8),
+                        line_dash="dash",
+                        line_color="red",
+                        annotation_text="Climate shock",
+                        annotation_position="top right",
+                    )
+
                 fig.update_layout(
                     height=450,
                     margin=dict(l=10, r=10, t=30, b=10),
@@ -583,28 +670,30 @@ with tab_single:
                 st.plotly_chart(fig, use_container_width=True)
 
                 with st.expander("Advanced view: final snapshot", expanded=False):
-                    c1, c2 = st.columns(2)
+                    c1_adv, c2_adv = st.columns(2)
                     last_row = df.iloc[-1]
-                    c1.metric("Final GDP", f"{float(last_row['gdp']):.1f}")
-                    c1.metric("Final Emissions", f"{float(last_row['emissions']):.1f}")
-                    c2.metric("Final Gini", f"{float(last_row['gini_proxy']):.3f}")
-                    c2.metric("Final Stability", f"{float(last_row['stability']):.3f}")
+                    c1_adv.metric("Final GDP", f"{float(last_row['gdp']):.1f}")
+                    c1_adv.metric("Final Emissions", f"{float(last_row['emissions']):.1f}")
+                    c2_adv.metric("Final Gini", f"{float(last_row['gini_proxy']):.3f}")
+                    c2_adv.metric("Final Stability", f"{float(last_row['stability']):.3f}")
 
                 st.markdown("### Parameters used")
                 st.write(
                     {
                         "Scenario preset": scenario_preset,
                         "Scenario name": scenario_name_input,
+                        "Population": int(population_size),
                         "Tax rate": round(params_single["tax"], 3),
                         "UBI (fraction)": round(params_single["ubi"], 3),
                         "Education (GDP share)": round(params_single["edu"], 3),
                         "Resource cap": round(params_single["cap"], 3),
                         "Regime": params_single["regime"],
                         "Ticks": int(ticks),
+                        "Recession": bool(enable_recession),
+                        "Climate shock": bool(enable_climate_shock),
                     }
                 )
 
-            # --- Right: summary, insight, exports ---
             with col2:
                 st.subheader("Summary snapshot")
                 last = df.iloc[-1].to_dict()
@@ -634,6 +723,7 @@ with tab_single:
                     ticks=int(ticks),
                     df=df,
                     insight_md=insight_md,
+                    num_agents=int(population_size),
                 )
                 pdf_bytes = export_pdf_bytes(
                     brief_lines, title="OriginForge Policy Brief"
@@ -686,6 +776,15 @@ with tab_compare:
         key="compare_ticks",
     )
 
+    population_cmp = st.number_input(
+        "Population size (agents, both scenarios)",
+        min_value=100,
+        max_value=5000,
+        value=500,
+        step=100,
+        key="compare_population",
+    )
+
     run_compare = st.button("▶️ Run comparison")
     st.markdown("")
 
@@ -702,6 +801,9 @@ with tab_compare:
                     params_A["cap"],
                     params_A["regime"],
                     int(ticks_cmp),
+                    int(population_cmp),
+                    False,
+                    False,
                 )
                 df_B = run_world_with_params_cached(
                     params_B["tax"],
@@ -710,13 +812,15 @@ with tab_compare:
                     params_B["cap"],
                     params_B["regime"],
                     int(ticks_cmp),
+                    int(population_cmp),
+                    False,
+                    False,
                 )
             except Exception as e:
                 st.error(f"Error running comparison: {e}")
                 df_A, df_B = pd.DataFrame(), pd.DataFrame()
 
         if not df_A.empty and not df_B.empty:
-            # GDP comparison
             st.subheader("GDP over time")
             fig_gdp = go.Figure()
             fig_gdp.add_trace(
@@ -736,7 +840,6 @@ with tab_compare:
             )
             st.plotly_chart(fig_gdp, use_container_width=True)
 
-            # Gini comparison
             st.subheader("Inequality (Gini) over time")
             fig_gini = go.Figure()
             fig_gini.add_trace(
@@ -760,7 +863,6 @@ with tab_compare:
             )
             st.plotly_chart(fig_gini, use_container_width=True)
 
-            # Simple text insight
             last_A = df_A.iloc[-1]
             last_B = df_B.iloc[-1]
 
@@ -802,7 +904,6 @@ with tab_compare:
 
             st.write("\n\n".join(insight_lines))
 
-            # Combined CSV export
             df_A_copy = df_A.copy()
             df_B_copy = df_B.copy()
             df_A_copy["scenario"] = scenario_A
@@ -863,6 +964,11 @@ with tab_dev:
             "scenario_name": last_run["name"],
             "params": last_run["params"],
             "ticks": last_run["ticks"],
+            "population_size": last_run.get("population_size", 500),
+            "shocks": {
+                "recession": last_run.get("enable_recession", False),
+                "climate_shock": last_run.get("enable_climate_shock", False),
+            },
             "metrics": df_last.to_dict(orient="records"),
         }
 
@@ -872,6 +978,7 @@ with tab_dev:
                 "scenario_name": last_run["name"],
                 "params": last_run["params"],
                 "ticks": last_run["ticks"],
+                "population_size": last_run.get("population_size", 500),
                 "metrics_sample": preview_records,
             }
         )
@@ -883,3 +990,46 @@ with tab_dev:
             file_name="originforge_last_run.json",
             mime="application/json",
         )
+
+# ===================
+# TAB 5: DISTRIBUTIONS
+# ===================
+with tab_dist:
+    st.markdown(
+        """
+        #### 📦 Distributions  
+        Visualize synthetic income and stability distributions for the last single scenario.
+        """.strip()
+    )
+
+    last_run = st.session_state.get("last_single_run", None)
+    if last_run is None:
+        st.info("Run a single scenario first to see distributions.")
+    else:
+        df_last: pd.DataFrame = last_run["df"]
+        last_row = df_last.iloc[-1]
+
+        np.random.seed(42)
+        pop_size = int(last_run.get("population_size", 500))
+
+        incomes = np.random.lognormal(
+            mean=3.0,
+            sigma=0.4,
+            size=pop_size,
+        ) * max(float(last_row["gdp"]) / 5000.0, 0.1)
+
+        stability_vals = np.random.normal(
+            loc=float(last_row["stability"]),
+            scale=0.05,
+            size=pop_size,
+        )
+
+        col_income, col_stab = st.columns(2)
+
+        with col_income:
+            st.subheader("Income distribution (synthetic)")
+            st.bar_chart(pd.Series(incomes, name="income"))
+
+        with col_stab:
+            st.subheader("Stability distribution (synthetic)")
+            st.bar_chart(pd.Series(stability_vals, name="stability"))
