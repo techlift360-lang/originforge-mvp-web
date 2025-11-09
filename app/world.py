@@ -1,14 +1,22 @@
 import numpy as np
 import pandas as pd
-from app.agents import Household, Firm, Government
+from agents import Household, Firm, Government
 
 class World:
     def __init__(self, n_households=500, n_firms=20, seed=42,
                  tax_rate=0.2, ubi_rate=0.1, education_spend=0.05, resource_cap=0.2, regime="democracy"):
         self.rng = np.random.default_rng(seed)
-        self.households = [Household(wage=self.rng.normal(1000, 200), education=self.rng.uniform(0.8, 1.2))
-                           for _ in range(n_households)]
-        self.firms = [Firm(productivity=self.rng.uniform(0.8, 1.2)) for _ in range(n_firms)]
+        self.households = [
+            Household(
+                wage=self.rng.normal(1000, 200),
+                education=self.rng.uniform(0.8, 1.2)
+            )
+            for _ in range(n_households)
+        ]
+        self.firms = [
+            Firm(productivity=self.rng.uniform(0.8, 1.2))
+            for _ in range(n_firms)
+        ]
         self.gov = Government(tax_rate, ubi_rate, education_spend, resource_cap, regime)
         self.tick = 0
         self.history = []
@@ -32,7 +40,7 @@ class World:
             "median_income": median_income,
             "ubi_amount": ubi_amt,
             "gini_proxy": gini_proxy(wealths),
-            "stability": float(1.0 - np.clip(np.mean(unrest), 0, 1))
+            "stability": float(1.0 - np.clip(np.mean(unrest), 0, 1)),
         }
 
     def step(self):
@@ -51,6 +59,7 @@ class World:
     def run(self, ticks=100):
         for _ in range(ticks):
             self.step()
+        import pandas as pd  # local import for safety
         return pd.DataFrame(self.history)
 
 def gini_proxy(values):
