@@ -17,9 +17,12 @@ st.set_page_config(
     layout="wide",
 )
 
-# Initialize run history in session state
+# Initialize run history and last run in session state
 if "run_history" not in st.session_state:
     st.session_state["run_history"] = []  # list of dicts
+
+if "last_single_run" not in st.session_state:
+    st.session_state["last_single_run"] = None  # dict with name, params, ticks, df
 
 
 # ---------------------------
@@ -54,14 +57,25 @@ SCENARIOS: Dict[str, Dict[str, Any] | None] = {
 # ---------------------------
 # Helper Functions
 # ---------------------------
-def run_world_with_params(params: Dict[str, Any], ticks: int) -> pd.DataFrame:
-    """Helper to run a world and return its dataframe."""
+@st.cache_data(show_spinner=False)
+def run_world_with_params_cached(
+    tax: float,
+    ubi: float,
+    edu: float,
+    cap: float,
+    regime: str,
+    ticks: int,
+) -> pd.DataFrame:
+    """
+    Cached simulation runner.
+    Same parameters + ticks -> instantly returns cached result.
+    """
     world = World(
-        tax_rate=params["tax"],
-        ubi_rate=params["ubi"],
-        education_spend=params["edu"],
-        resource_cap=params["cap"],
-        regime=params["regime"],
+        tax_rate=tax,
+        ubi_rate=ubi,
+        education_spend=edu,
+        resource_cap=cap,
+        regime=regime,
     )
     df = world.run(ticks=int(ticks))
     return df
@@ -172,6 +186,7 @@ def build_policy_brief_lines(
 
 
 def add_run_to_history(name: str, params: Dict[str, Any], df: pd.DataFrame) -> None:
+    """Store a compact summary of the run in session history."""
     if df.empty:
         return
     last = df.iloc[-1]
@@ -313,10 +328,10 @@ with st.sidebar:
 
 
 # ---------------------------
-# Tabs: Single vs Compare
+# Tabs: Single vs Compare vs History vs Dev
 # ---------------------------
-tab_single, tab_compare, tab_history = st.tabs(
-    ["Single Scenario", "Compare Scenarios", "Run History"]
+tab_single, tab_compare, tab_history, tab_dev = st.tabs(
+    ["Single Scenario", "Compare Scenarios", "Run History", "Developer View"]
 )
 
 # ==============
@@ -337,13 +352,27 @@ with tab_single:
     if st.button("▶️ Run single scenario", type="primary"):
         with st.spinner("Running simulation..."):
             try:
-                df = run_world_with_params(params_single, ticks)
+                df = run_world_with_params_cached(
+                    params_single["tax"],
+                    params_single["ubi"],
+                    params_single["edu"],
+                    params_single["cap"],
+                    params_single["regime"],
+                    int(ticks),
+                )
             except Exception as e:
                 st.error(f"An error occurred while running the simulation: {e}")
                 df = pd.DataFrame()
 
         if not df.empty:
             add_run_to_history(scenario_name_input, params_single, df)
+            # store detailed last run for Developer View
+            st.session_state["last_single_run"] = {
+                "name": scenario_name_input,
+                "params": params_single,
+                "ticks": int(ticks),
+                "df": df,
+            }
 
             # --- Left: charts & details ---
             with col1:
@@ -372,9 +401,8 @@ with tab_single:
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                with st.expander("Advanced view: final distributions", expanded=False):
+                with st.expander("Advanced view: final snapshot", expanded=False):
                     c1, c2 = st.columns(2)
-                    # GDP vs Emissions scatter (final snapshot)
                     last = df.iloc[-1]
                     c1.metric("Final GDP", f"{last['gdp']:.1f}")
                     c1.metric("Final Emissions", f"{last['emissions']:.1f}")
@@ -422,7 +450,7 @@ with tab_single:
                 brief_lines = build_policy_brief_lines(
                     scenario_name=scenario_name_input,
                     params=params_single,
-                    ticks=ticks,
+                    ticks=int(ticks),
                     df=df,
                     insight_md=insight_md,
                 )
@@ -477,8 +505,22 @@ with tab_compare:
                 params_A = SCENARIOS[scenario_A]  # type: ignore
                 params_B = SCENARIOS[scenario_B]  # type: ignore
 
-                df_A = run_world_with_params(params_A, ticks_cmp)
-                df_B = run_world_with_params(params_B, ticks_cmp)
+                df_A = run_world_with_params_cached(
+                    params_A["tax"],
+                    params_A["ubi"],
+                    params_A["edu"],
+                    params_A["cap"],
+                    params_A["regime"],
+                    int(ticks_cmp),
+                )
+                df_B = run_world_with_params_cached(
+                    params_B["tax"],
+                    params_B["ubi"],
+                    params_B["edu"],
+                    params_B["cap"],
+                    params_B["regime"],
+                    int(ticks_cmp),
+                )
             except Exception as e:
                 st.error(f"Error running comparison: {e}")
                 df_A, df_B = pd.DataFrame(), pd.DataFrame()
@@ -586,3 +628,42 @@ with tab_history:
         st.info("No runs yet. Run a scenario in the Single Scenario tab to see history here.")
     else:
         st.dataframe(pd.DataFrame(history))
+
+# ===================
+# TAB 4: DEVELOPER VIEW
+# ===================
+with tab_dev:
+    st.subheader("Developer view — JSON payload for last single scenario run")
+
+    last_run = st.session_state.get("last_single_run", None)
+
+    if last_run is None:
+        st.info("No single scenario run in this session yet. Run one first.")
+    else:
+        df_last = last_run["df"]
+        preview_records = df_last.head(10).to_dict(orient="records")
+
+        payload = {
+            "scenario_name": last_run["name"],
+            "params": last_run["params"],
+            "ticks": last_run["ticks"],
+            "metrics": df_last.to_dict(orient="records"),
+        }
+
+        st.markdown("### Preview (first 10 records)")
+        st.json(
+            {
+                "scenario_name": last_run["name"],
+                "params": last_run["params"],
+                "ticks": last_run["ticks"],
+                "metrics_sample": preview_records,
+            }
+        )
+
+        json_bytes = json.dumps(payload, indent=2).encode("utf-8")
+        st.download_button(
+            label="⬇️ Download full JSON payload",
+            data=json_bytes,
+            file_name="originforge_last_run.json",
+            mime="application/json",
+        )
