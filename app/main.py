@@ -76,6 +76,7 @@ SCENARIOS: Dict[str, Optional[Dict[str, Any]]] = {
 # Helper Functions
 # ---------------------------
 
+
 def clamp_float(value: Any, lo: float, hi: float, fallback: float) -> float:
     """Convert to float and clamp to [lo, hi]; fallback on error."""
     try:
@@ -92,6 +93,7 @@ def clamp_int(value: Any, lo: int, hi: int, fallback: int) -> int:
     except (TypeError, ValueError):
         return fallback
     return max(lo, min(hi, x))
+
 
 @st.cache_data(show_spinner=False)
 def run_world_with_params_cached(
@@ -143,8 +145,6 @@ def run_world_with_params_cached(
     return df
 
 
-
-
 def get_params_for_scenario(name: str, sliders: Dict[str, Any]) -> Dict[str, Any]:
     """
     Resolve the effective parameters, either from a preset scenario
@@ -169,13 +169,20 @@ def pct_change(new: float, old: float) -> float:
     return 100.0 * (new - old) / abs(old)
 
 
-def describe_single_run(df: pd.DataFrame) -> str:
+def describe_single_run(
+    df: pd.DataFrame,
+    recession: bool,
+    climate_shock: bool,
+) -> str:
     """
-    Create a human-readable summary for a single scenario run.
-    Uses first vs last row to describe trends.
+    Create a human-readable story summary for a single scenario run.
+
+    - Describes trends in GDP, inequality, and stability.
+    - Labels the society as high/low growth, more/less equal, stable/fragile.
+    - Mentions whether shocks were triggered.
     """
     if df.empty or len(df) < 2:
-        return "Not enough data to summarize."
+        return "Not enough data to summarize this run."
 
     first = df.iloc[0]
     last = df.iloc[-1]
@@ -186,29 +193,72 @@ def describe_single_run(df: pd.DataFrame) -> str:
 
     lines: List[str] = []
 
-    # GDP
-    if gdp_change > 2:
-        lines.append(f"• GDP grew by about **{gdp_change:.1f}%** over the simulation.")
-    elif gdp_change < -2:
-        lines.append(f"• GDP decreased by about **{abs(gdp_change):.1f}%** over the simulation.")
+    # GDP trend
+    if gdp_change > 5:
+        growth_label = "high-growth economy"
+        lines.append(f"• GDP grew strongly by about **{gdp_change:.1f}%** over the simulation.")
+    elif gdp_change > 1:
+        growth_label = "moderate-growth economy"
+        lines.append(f"• GDP increased by approximately **{gdp_change:.1f}%**.")
+    elif gdp_change < -5:
+        growth_label = "shrinking economy"
+        lines.append(f"• GDP **fell sharply**, declining by about **{abs(gdp_change):.1f}%**.")
+    elif gdp_change < -1:
+        growth_label = "low-growth / shrinking economy"
+        lines.append(f"• GDP decreased by about **{abs(gdp_change):.1f}%**.")
     else:
-        lines.append("• GDP stayed relatively **stable** over the simulation.")
+        growth_label = "flat-growth economy"
+        lines.append("• GDP stayed relatively **flat** over the simulation.")
 
-    # Inequality (Gini)
-    if gini_change < -1:
-        lines.append(f"• Inequality (Gini) **decreased** by roughly {abs(gini_change):.1f}%.")
+    # Inequality trend
+    if gini_change < -3:
+        equality_label = "more equal"
+        lines.append(f"• Inequality (Gini) **decreased noticeably** by about {abs(gini_change):.1f}%.")
+    elif gini_change < -1:
+        equality_label = "slightly more equal"
+        lines.append(f"• Inequality (Gini) decreased modestly by around {abs(gini_change):.1f}%.")
+    elif gini_change > 3:
+        equality_label = "more unequal"
+        lines.append(f"• Inequality (Gini) **increased significantly** by about {gini_change:.1f}%.")
     elif gini_change > 1:
-        lines.append(f"• Inequality (Gini) **increased** by roughly {gini_change:.1f}%.")
+        equality_label = "slightly more unequal"
+        lines.append(f"• Inequality (Gini) increased modestly by around {gini_change:.1f}%.")
     else:
+        equality_label = "similar inequality"
         lines.append("• Inequality (Gini) remained **roughly constant**.")
 
-    # Stability
-    if stab_change > 2:
+    # Stability trend
+    if stab_change > 5:
+        stability_label = "more stable"
         lines.append(f"• Social stability **improved**, rising by about {stab_change:.1f}%.")
-    elif stab_change < -2:
-        lines.append(f"• Social stability **declined**, falling by about {abs(stab_change):.1f}%.")
+    elif stab_change > 1:
+        stability_label = "slightly more stable"
+        lines.append(f"• Social stability increased by roughly {stab_change:.1f}%.")
+    elif stab_change < -5:
+        stability_label = "fragile"
+        lines.append(f"• Social stability **deteriorated**, falling by about {abs(stab_change):.1f}%.")
+    elif stab_change < -1:
+        stability_label = "slightly less stable"
+        lines.append(f"• Social stability slipped by roughly {abs(stab_change):.1f}%.")
     else:
+        stability_label = "similar stability"
         lines.append("• Social stability stayed **fairly stable**.")
+
+    # Shocks context
+    if recession and climate_shock:
+        lines.append("• Both a **mid-run recession** and a **late climate shock** were applied.")
+    elif recession:
+        lines.append("• A **mid-run recession** was applied during the simulation.")
+    elif climate_shock:
+        lines.append("• A **late climate shock** was applied during the simulation.")
+    else:
+        lines.append("• No explicit shocks were applied; trends are driven purely by policy settings.")
+
+    # Final one-line synthesis
+    lines.append("")
+    lines.append(
+        f"_Overall, this run produces a **{growth_label}** that is **{equality_label}** with **{stability_label}** society._"
+    )
 
     return "\n".join(lines)
 
@@ -298,7 +348,6 @@ try:
     st.image("assets/originforge-banner.png", width=800)
 except Exception:
     pass
-
 
 header_left, header_right = st.columns([3, 1])
 
@@ -720,8 +769,12 @@ with tab_single:
                 st.metric("Innovation", f'{float(last["innovation"]):.3f}')
                 st.metric("Emissions", f'{float(last["emissions"]):.3f}')
 
-                st.markdown("### Quick insight")
-                insight_md = describe_single_run(df)
+                st.markdown("### Simulation story")
+                insight_md = describe_single_run(
+                    df,
+                    recession=bool(enable_recession),
+                    climate_shock=bool(enable_climate_shock),
+                )
                 st.markdown(insight_md)
 
                 st.markdown("### Export results")
