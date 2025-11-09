@@ -8,7 +8,7 @@ This module defines the full Streamlit app for:
 - Developer view (JSON payload for the last single run)
 
 Backed by:
-- world.World          -> simulation engine
+- world.World            -> simulation engine
 - utils.export_pdf_bytes -> PDF policy brief generation
 """
 
@@ -249,28 +249,71 @@ header_left, header_right = st.columns([3, 1])
 with header_left:
     st.markdown(
         """
-        ### 🌍 OriginForge — Policy Sandbox  
-        Explore how tax, UBI, education, and resource policies shape a virtual society over time.
-        """.strip()
+        ## 🌍 OriginForge — Policy Sandbox  
+        <span style="font-size: 14px; color: #9CA3AF;">
+        Interactively explore how tax, UBI, education, and resource policies shape a virtual society over time.
+        </span>
+        """,
+        unsafe_allow_html=True,
     )
 
 with header_right:
     st.markdown(
         """
-        <div style="text-align:right; font-size: 12px; color:#9CA3AF;">
+        <div style="text-align:right; font-size: 12px; color:#6B7280;">
         v1.0 • Simulation sandbox (educational & exploratory)
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-with st.expander("How it works", expanded=False):
+st.markdown("")
+
+# Quick 3-step cards
+c1, c2, c3 = st.columns(3)
+with c1:
     st.markdown(
         """
-        1. Choose a **preset** or adjust **policy sliders** in the sidebar.  
-        2. Run a **single scenario** to see how GDP, inequality, stability, innovation, and emissions evolve.  
-        3. Use **Compare Scenarios** to contrast two policy regimes.  
-        4. Export results as **CSV, PDF policy brief, or JSON** for deeper analysis.
+        <div style="border-radius: 14px; padding: 12px 14px; background-color: #020617; border: 1px solid #1E293B;">
+          <div style="font-size: 12px; color:#64748B; text-transform: uppercase; letter-spacing: .08em;">Step 1</div>
+          <div style="font-size: 14px; font-weight: 600; margin-top: 4px;">Choose policies</div>
+          <div style="font-size: 12px; color:#9CA3AF; margin-top: 4px;">Pick a preset or tune tax, UBI, education, and resource caps.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with c2:
+    st.markdown(
+        """
+        <div style="border-radius: 14px; padding: 12px 14px; background-color: #020617; border: 1px solid #1E293B;">
+          <div style="font-size: 12px; color:#64748B; text-transform: uppercase; letter-spacing: .08em;">Step 2</div>
+          <div style="font-size: 14px; font-weight: 600; margin-top: 4px;">Run the simulation</div>
+          <div style="font-size: 12px; color:#9CA3AF; margin-top: 4px;">See how GDP, inequality, stability, innovation, and emissions evolve.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with c3:
+    st.markdown(
+        """
+        <div style="border-radius: 14px; padding: 12px 14px; background-color: #020617; border: 1px solid #1E293B;">
+          <div style="font-size: 12px; color:#64748B; text-transform: uppercase; letter-spacing: .08em;">Step 3</div>
+          <div style="font-size: 14px; font-weight: 600; margin-top: 4px;">Compare & export</div>
+          <div style="font-size: 12px; color:#9CA3AF; margin-top: 4px;">Compare scenarios side-by-side and export CSV, PDF, or JSON.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+st.markdown("")
+
+with st.expander("How the model works", expanded=False):
+    st.markdown(
+        """
+        - The world contains households, firms, and a government.  
+        - Policies influence income, redistribution, innovation, emissions, and stability.  
+        - Each **tick** represents a time step (e.g., month or year) where agents interact.  
+        - Metrics are proxies, calibrated for exploration and teaching rather than precise forecasts.
         """.strip()
     )
 
@@ -283,27 +326,30 @@ with st.expander("About & disclaimer", expanded=False):
         """.strip()
     )
 
+st.markdown("---")
+
 # ---------------------------
 # Sidebar: Global Controls
 # ---------------------------
 
 with st.sidebar:
-    st.markdown("## ⚙️ Scenario Controls")
+    st.markdown("### 🎛 Scenario Controls")
 
     scenario_name_input = st.text_input(
         "Scenario name",
         value="My Scenario",
-        help="This name will appear in the policy brief, run history, and JSON payload.",
+        help="This name appears in the policy brief, run history, and JSON payload.",
     )
 
     scenario_preset = st.selectbox(
         "Preset",
         list(SCENARIOS.keys()),
-        help="Choose a preset, or 'Custom (use sliders)' to use the sliders below.",
+        help="Choose a preset, or 'Custom (use sliders)' to control everything manually.",
         key="single_scenario",
     )
 
-    st.markdown("**Policy sliders (used in Custom mode)**")
+    st.markdown("#### Policy sliders")
+    st.caption("Used when preset is **Custom (use sliders)**.")
 
     tax = st.slider(
         "Tax rate",
@@ -311,7 +357,7 @@ with st.sidebar:
         0.50,
         0.20,
         0.01,
-        help="Higher tax can reduce GDP growth but may support redistribution.",
+        help="Higher tax slightly dampens output but can support redistribution.",
         key="single_tax",
     )
     ubi = st.slider(
@@ -338,7 +384,7 @@ with st.sidebar:
         0.40,
         0.20,
         0.01,
-        help="Stronger caps reduce emissions but can lower output.",
+        help="Stronger caps reduce emissions but can also reduce output.",
         key="single_cap",
     )
     regime = st.selectbox(
@@ -354,12 +400,12 @@ with st.sidebar:
         max_value=5000,
         value=200,
         step=50,
-        help="Think of ticks as time steps (e.g., months or years).",
+        help="Higher values simulate longer time horizons.",
         key="single_ticks",
     )
 
     st.markdown("---")
-    st.markdown("### 💾 Save / Load Config")
+    st.markdown("#### 💾 Save / Load config")
 
     current_config = {
         "name": scenario_name_input,
@@ -420,6 +466,13 @@ tab_single, tab_compare, tab_history, tab_dev = st.tabs(
 # TAB 1: SINGLE
 # ==============
 with tab_single:
+    st.markdown(
+        """
+        #### 🎯 Single Scenario  
+        Configure a single policy setup and see how the virtual society evolves over time.
+        """.strip()
+    )
+
     sliders_single = {
         "tax": tax,
         "ubi": ubi,
@@ -431,7 +484,10 @@ with tab_single:
 
     col1, col2 = st.columns([2.2, 1.0])
 
-    if st.button("▶️ Run single scenario", type="primary"):
+    run_button = st.button("▶️ Run single scenario", type="primary")
+    st.markdown("")
+
+    if run_button:
         with st.spinner("Running simulation..."):
             try:
                 df = run_world_with_params_cached(
@@ -521,7 +577,7 @@ with tab_single:
                 insight_md = describe_single_run(df)
                 st.markdown(insight_md)
 
-                st.markdown("### Exports")
+                st.markdown("### Export results")
                 csv_data = df.to_csv(index=False).encode("utf-8")
                 st.download_button(
                     label="⬇️ Download data (CSV)",
@@ -553,7 +609,12 @@ with tab_single:
 # TAB 2: COMPARISON
 # ===================
 with tab_compare:
-    st.subheader("Compare two policy scenarios")
+    st.markdown(
+        """
+        #### ⚖️ Compare Scenarios  
+        Pick two presets and compare how GDP and inequality evolve under each policy regime.
+        """.strip()
+    )
 
     colA, colB = st.columns(2)
 
@@ -583,7 +644,10 @@ with tab_compare:
         key="compare_ticks",
     )
 
-    if st.button("▶️ Run comparison"):
+    run_compare = st.button("▶️ Run comparison")
+    st.markdown("")
+
+    if run_compare:
         with st.spinner("Running comparison…"):
             try:
                 params_A = SCENARIOS[scenario_A]  # type: ignore[assignment]
@@ -611,7 +675,7 @@ with tab_compare:
 
         if not df_A.empty and not df_B.empty:
             # GDP comparison
-            st.markdown("### GDP over time")
+            st.subheader("GDP over time")
             fig_gdp = go.Figure()
             fig_gdp.add_trace(
                 go.Scatter(
@@ -631,7 +695,7 @@ with tab_compare:
             st.plotly_chart(fig_gdp, use_container_width=True)
 
             # Gini comparison
-            st.markdown("### Inequality (Gini) over time")
+            st.subheader("Inequality (Gini) over time")
             fig_gini = go.Figure()
             fig_gini.add_trace(
                 go.Scatter(
@@ -697,7 +761,7 @@ with tab_compare:
                 [df_A_copy, df_B_copy], ignore_index=True
             )
 
-            st.markdown("### Exports")
+            st.markdown("### Export comparison data")
             csv_cmp = df_combined.to_csv(index=False).encode("utf-8")
             st.download_button(
                 label="⬇️ Download comparison data (CSV)",
@@ -714,10 +778,15 @@ with tab_compare:
 # TAB 3: RUN HISTORY
 # ===================
 with tab_history:
-    st.subheader("Recent runs (this session)")
+    st.markdown(
+        """
+        #### 📜 Run History  
+        A compact view of the most recent runs in this session.
+        """.strip()
+    )
     history = st.session_state["run_history"]
     if not history:
-        st.info("No runs yet. Run a scenario in the Single Scenario tab to see history here.")
+        st.info("No runs yet. Run a scenario in the **Single Scenario** tab to see history here.")
     else:
         st.dataframe(pd.DataFrame(history))
 
@@ -725,12 +794,17 @@ with tab_history:
 # TAB 4: DEVELOPER VIEW
 # ===================
 with tab_dev:
-    st.subheader("Developer view — JSON payload for last single scenario run")
+    st.markdown(
+        """
+        #### 🧩 Developer View  
+        Inspect and export the full JSON payload for the last single-scenario run.
+        """.strip()
+    )
 
     last_run = st.session_state.get("last_single_run", None)
 
     if last_run is None:
-        st.info("No single scenario run in this session yet. Run one first.")
+        st.info("No single scenario run in this session yet. Run one in the **Single Scenario** tab first.")
     else:
         df_last: pd.DataFrame = last_run["df"]
         preview_records = df_last.head(10).to_dict(orient="records")
@@ -742,7 +816,7 @@ with tab_dev:
             "metrics": df_last.to_dict(orient="records"),
         }
 
-        st.markdown("### Preview (first 10 records)")
+        st.markdown("##### JSON preview (first 10 records)")
         st.json(
             {
                 "scenario_name": last_run["name"],
