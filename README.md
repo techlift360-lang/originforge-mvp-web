@@ -63,3 +63,12 @@ OriginForge makes them *tangible* — it turns policy ideas into visual feedback
    ```bash
    git clone https://github.com/<your-username>/originforge-mvp-web.git
    cd originforge-mvp-web
+---
+
+<p align="center">
+  <img src="assets/originforge-footer.png" alt="OriginForge Footer" width="800"/>
+</p>
+
+<p align="center">
+  <sub>Built with ❤️ by <strong>TechLift360</strong> • Powered by <a href="https://streamlit.io">Streamlit</a> & AI</sub>
+</p>
