@@ -106,13 +106,14 @@ def run_world_with_params_cached(
     num_agents: int,
     recession: bool,
     climate_shock: bool,
+    adapt_policies: bool,
 ) -> pd.DataFrame:
     """
     Cached simulation runner.
 
     Works with both:
-    - New World(...) that accepts num_agents
-    - Older World(...) that does not (fallback without error)
+    - New World(...) that accepts num_agents & adapt_policies
+    - Older World(...) that may not (fallback without error)
     """
     ticks = max(1, min(int(ticks), 5000))
     num_agents = max(50, min(int(num_agents), 5000))
@@ -137,11 +138,20 @@ def run_world_with_params_cached(
             regime=regime,
         )
 
-    df = world.run(
-        ticks=ticks,
-        recession=recession,
-        climate_shock=climate_shock,
-    )
+    # Try to call with adapt_policies; fall back if not supported
+    try:
+        df = world.run(
+            ticks=ticks,
+            recession=recession,
+            climate_shock=climate_shock,
+            adapt_policies=adapt_policies,
+        )
+    except TypeError:
+        df = world.run(
+            ticks=ticks,
+            recession=recession,
+            climate_shock=climate_shock,
+        )
     return df
 
 
@@ -173,13 +183,14 @@ def describe_single_run(
     df: pd.DataFrame,
     recession: bool,
     climate_shock: bool,
+    adapt_policies: bool,
 ) -> str:
     """
     Create a human-readable story summary for a single scenario run.
 
     - Describes trends in GDP, inequality, and stability.
     - Labels the society as high/low growth, more/less equal, stable/fragile.
-    - Mentions whether shocks were triggered.
+    - Mentions shocks and whether policies adapted over time.
     """
     if df.empty or len(df) < 2:
         return "Not enough data to summarize this run."
@@ -254,6 +265,32 @@ def describe_single_run(
     else:
         lines.append("• No explicit shocks were applied; trends are driven purely by policy settings.")
 
+    # Policy feedback context
+    if adapt_policies:
+        if "tax_rate" in df.columns and "ubi_rate" in df.columns:
+            tax_diff = (float(df["tax_rate"].iloc[-1]) - float(df["tax_rate"].iloc[0])) * 100
+            ubi_diff = (float(df["ubi_rate"].iloc[-1]) - float(df["ubi_rate"].iloc[0])) * 100
+            edu_diff = (float(df["education_spend"].iloc[-1]) - float(df["education_spend"].iloc[0])) * 100
+            cap_diff = (float(df["resource_cap"].iloc[-1]) - float(df["resource_cap"].iloc[0])) * 100
+
+            changed = any(abs(x) > 0.2 for x in [tax_diff, ubi_diff, edu_diff, cap_diff])
+            if changed:
+                lines.append(
+                    "• Government policies **adapted over time**, nudging tax, UBI, "
+                    "education, and resource caps in response to conditions."
+                )
+            else:
+                lines.append(
+                    "• Policy feedback was enabled, but the government found little reason "
+                    "to move far from the initial settings."
+                )
+        else:
+            lines.append(
+                "• Government policy feedback was enabled, guiding small adjustments to the levers over time."
+            )
+    else:
+        lines.append("• Policy settings were held **fixed** throughout the run.")
+
     # Final one-line synthesis
     lines.append("")
     lines.append(
@@ -279,7 +316,7 @@ def build_policy_brief_lines(
     lines.append(f"Ticks simulated: {int(ticks)}")
     lines.append(f"Population (agents): {int(num_agents)}")
     lines.append("")
-    lines.append("Policy Parameters:")
+    lines.append("Policy Parameters (initial):")
     lines.append(f"- Tax rate: {params['tax']:.3f}")
     lines.append(f"- UBI (fraction of median income): {params['ubi']:.3f}")
     lines.append(f"- Education (GDP share): {params['edu']:.3f}")
@@ -295,6 +332,13 @@ def build_policy_brief_lines(
         lines.append(f"- Stability: {float(last['stability']):.3f}")
         lines.append(f"- Innovation: {float(last['innovation']):.3f}")
         lines.append(f"- Emissions: {float(last['emissions']):.3f}")
+        if "tax_rate" in df.columns:
+            lines.append("")
+            lines.append("Final Policy Levels (after feedback):")
+            lines.append(f"- Tax rate: {float(last['tax_rate']):.3f}")
+            lines.append(f"- UBI rate: {float(last['ubi_rate']):.3f}")
+            lines.append(f"- Education spend: {float(last['education_spend']):.3f}")
+            lines.append(f"- Resource cap: {float(last['resource_cap']):.3f}")
         lines.append("")
     else:
         lines.append("No metrics available (empty run).")
@@ -366,7 +410,7 @@ with header_right:
     st.markdown(
         """
         <div style="text-align:right; font-size: 12px; color:#6B7280;">
-        v1.1 • Simulation sandbox (educational & exploratory)
+        v1.2 • Simulation sandbox (educational & exploratory)
         </div>
         """,
         unsafe_allow_html=True,
@@ -533,6 +577,16 @@ with st.sidebar:
         key="enable_climate_shock",
     )
 
+    st.markdown("#### Policy feedback")
+
+    enable_policy_feedback = st.checkbox(
+        "Adaptive government (policy feedback)",
+        value=False,
+        help="Allow the government to nudge tax, UBI, education, and resource caps "
+             "in response to inequality, growth, emissions, and stability.",
+        key="enable_policy_feedback",
+    )
+
     st.markdown("---")
     st.markdown("#### 💾 Save / Load config")
 
@@ -548,6 +602,7 @@ with st.sidebar:
         "population_size": int(population_size),
         "enable_recession": bool(enable_recession),
         "enable_climate_shock": bool(enable_climate_shock),
+        "enable_policy_feedback": bool(enable_policy_feedback),
     }
     config_bytes = json.dumps(current_config, indent=2).encode("utf-8")
     st.download_button(
@@ -608,6 +663,9 @@ with st.sidebar:
             st.session_state["enable_climate_shock"] = bool(
                 loaded_cfg.get("enable_climate_shock", enable_climate_shock)
             )
+            st.session_state["enable_policy_feedback"] = bool(
+                loaded_cfg.get("enable_policy_feedback", enable_policy_feedback)
+            )
             st.success("Config loaded. Controls will update on next rerun.")
         except Exception as e:
             st.error(f"Could not load config: {e}")
@@ -666,6 +724,7 @@ with tab_single:
                     int(population_size),
                     bool(enable_recession),
                     bool(enable_climate_shock),
+                    bool(enable_policy_feedback),
                 )
             except Exception as e:
                 st.error(f"An error occurred while running the simulation: {e}")
@@ -686,6 +745,7 @@ with tab_single:
                 "population_size": int(population_size),
                 "enable_recession": bool(enable_recession),
                 "enable_climate_shock": bool(enable_climate_shock),
+                "enable_policy_feedback": bool(enable_policy_feedback),
             }
 
             with col1:
@@ -742,20 +802,32 @@ with tab_single:
                     c2_adv.metric("Final Gini", f"{float(last_row['gini_proxy']):.3f}")
                     c2_adv.metric("Final Stability", f"{float(last_row['stability']):.3f}")
 
+                    if "tax_rate" in df.columns:
+                        st.markdown("**Policy path (first → last):**")
+                        st.write(
+                            {
+                                "Tax": f"{df['tax_rate'].iloc[0]:.3f} → {df['tax_rate'].iloc[-1]:.3f}",
+                                "UBI": f"{df['ubi_rate'].iloc[0]:.3f} → {df['ubi_rate'].iloc[-1]:.3f}",
+                                "Education": f"{df['education_spend'].iloc[0]:.3f} → {df['education_spend'].iloc[-1]:.3f}",
+                                "Cap": f"{df['resource_cap'].iloc[0]:.3f} → {df['resource_cap'].iloc[-1]:.3f}",
+                            }
+                        )
+
                 st.markdown("### Parameters used")
                 st.write(
                     {
                         "Scenario preset": scenario_preset,
                         "Scenario name": scenario_name_input,
                         "Population": int(population_size),
-                        "Tax rate": round(params_single["tax"], 3),
-                        "UBI (fraction)": round(params_single["ubi"], 3),
-                        "Education (GDP share)": round(params_single["edu"], 3),
-                        "Resource cap": round(params_single["cap"], 3),
+                        "Tax rate (initial)": round(params_single["tax"], 3),
+                        "UBI (fraction, initial)": round(params_single["ubi"], 3),
+                        "Education (GDP share, initial)": round(params_single["edu"], 3),
+                        "Resource cap (initial)": round(params_single["cap"], 3),
                         "Regime": params_single["regime"],
                         "Ticks": int(ticks),
                         "Recession": bool(enable_recession),
                         "Climate shock": bool(enable_climate_shock),
+                        "Policy feedback": bool(enable_policy_feedback),
                     }
                 )
 
@@ -774,6 +846,7 @@ with tab_single:
                     df,
                     recession=bool(enable_recession),
                     climate_shock=bool(enable_climate_shock),
+                    adapt_policies=bool(enable_policy_feedback),
                 )
                 st.markdown(insight_md)
 
@@ -863,6 +936,7 @@ with tab_compare:
                 params_A = SCENARIOS[scenario_A]  # type: ignore[assignment]
                 params_B = SCENARIOS[scenario_B]  # type: ignore[assignment]
 
+                # For fair comparison, keep policy feedback + shocks off here
                 df_A = run_world_with_params_cached(
                     params_A["tax"],
                     params_A["ubi"],
@@ -871,6 +945,7 @@ with tab_compare:
                     params_A["regime"],
                     int(ticks_cmp),
                     int(population_cmp),
+                    False,
                     False,
                     False,
                 )
@@ -882,6 +957,7 @@ with tab_compare:
                     params_B["regime"],
                     int(ticks_cmp),
                     int(population_cmp),
+                    False,
                     False,
                     False,
                 )
@@ -1038,6 +1114,7 @@ with tab_dev:
                 "recession": last_run.get("enable_recession", False),
                 "climate_shock": last_run.get("enable_climate_shock", False),
             },
+            "policy_feedback": last_run.get("enable_policy_feedback", False),
             "metrics": df_last.to_dict(orient="records"),
         }
 
@@ -1048,6 +1125,7 @@ with tab_dev:
                 "params": last_run["params"],
                 "ticks": last_run["ticks"],
                 "population_size": last_run.get("population_size", 500),
+                "policy_feedback": last_run.get("enable_policy_feedback", False),
                 "metrics_sample": preview_records,
             }
         )
