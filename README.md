@@ -1,3 +1,11 @@
+<p align="center">
+  <img src="assets/originforge-banner.png" alt="OriginForge Banner" width="800"/>
+</p>
+
+# 🌍 OriginForge — Policy Sandbox (Web MVP)
+
+Explore how tax, UBI, education, and environmental policies shape a virtual economy through interactive AI-driven simulations.
+
 # 🌍 OriginForge — Policy Sandbox
 
 **OriginForge** is an interactive policy-simulation sandbox built with **Streamlit**.  
