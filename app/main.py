@@ -2,11 +2,13 @@
 OriginForge — Policy Sandbox (Streamlit Front-End)
 
 This module defines the full Streamlit app for:
+- Overview / landing page
 - Single-scenario simulations (with presets + custom sliders)
 - Scenario comparison (A vs B)
 - Run history (session)
 - Developer view (JSON payload for the last single run)
 - Distributions view (synthetic income & stability distributions)
+- Sector view (industry / services / green GDP)
 
 Backed by:
 - world.World            -> simulation engine
@@ -75,6 +77,86 @@ SCENARIOS: Dict[str, Optional[Dict[str, Any]]] = {
 # ---------------------------
 # Helper Functions
 # ---------------------------
+
+
+def _get_query_params() -> Dict[str, str]:
+    """
+    Try to read query params in a version-agnostic way, and normalize values to simple strings.
+    """
+    qp: Dict[str, str] = {}
+    try:
+        # Newer Streamlit
+        raw = st.query_params
+        if isinstance(raw, dict):
+            for k, v in raw.items():
+                if isinstance(v, list):
+                    qp[k] = v[0]
+                else:
+                    qp[k] = str(v)
+        else:
+            qp = dict(raw)
+    except Exception:
+        # Older API
+        try:
+            raw = st.experimental_get_query_params()
+            for k, v in raw.items():
+                if isinstance(v, list) and v:
+                    qp[k] = v[0]
+                else:
+                    qp[k] = str(v)
+        except Exception:
+            qp = {}
+    return qp
+
+
+def _apply_query_params_once() -> None:
+    """
+    Apply query params to session_state (only once) so you can share links like:
+
+    ?preset=High%20UBI%20Safety%20Net&ticks=400&feedback=1&recession=1&climate=0&pop=800
+    """
+    if st.session_state.get("qp_applied", False):
+        return
+
+    qp = _get_query_params()
+    if not qp:
+        st.session_state["qp_applied"] = True
+        return
+
+    preset = qp.get("preset")
+    if preset in SCENARIOS:
+        st.session_state["single_scenario"] = preset
+
+    def parse_int(val: Optional[str], lo: int, hi: int, default: int) -> int:
+        if val is None:
+            return default
+        try:
+            x = int(val)
+        except ValueError:
+            return default
+        return max(lo, min(hi, x))
+
+    def parse_bool(val: Optional[str], default: bool) -> bool:
+        if val is None:
+            return default
+        v = val.strip().lower()
+        if v in ("1", "true", "yes", "on"):
+            return True
+        if v in ("0", "false", "no", "off"):
+            return False
+        return default
+
+    ticks_from_qp = parse_int(qp.get("ticks"), 50, 5000, 200)
+    pop_from_qp = parse_int(qp.get("pop"), 100, 5000, 500)
+
+    st.session_state["single_ticks"] = ticks_from_qp
+    st.session_state["population_size"] = pop_from_qp
+
+    st.session_state["enable_recession"] = parse_bool(qp.get("recession"), False)
+    st.session_state["enable_climate_shock"] = parse_bool(qp.get("climate"), False)
+    st.session_state["enable_policy_feedback"] = parse_bool(qp.get("feedback"), False)
+
+    st.session_state["qp_applied"] = True
 
 
 def clamp_float(value: Any, lo: float, hi: float, fallback: float) -> float:
@@ -300,6 +382,89 @@ def describe_single_run(
     return "\n".join(lines)
 
 
+def recommend_next_steps(
+    df: pd.DataFrame,
+    params: Dict[str, Any],
+    recession: bool,
+    climate_shock: bool,
+    adapt_policies: bool,
+) -> List[str]:
+    """
+    Rule-based "AI-like" recommendations for what to try next.
+    This is deterministic and fully transparent (no external AI calls).
+    """
+    recs: List[str] = []
+    if df.empty or len(df) < 2:
+        recs.append("Run a scenario first to unlock targeted recommendations.")
+        return recs
+
+    last = df.iloc[-1]
+
+    gdp = float(last["gdp"])
+    gini = float(last["gini_proxy"])
+    stab = float(last["stability"])
+    emis = float(last["emissions"])
+    inn = float(last["innovation"])
+
+    # Inequality / stability
+    if gini > 0.42 and stab < 0.6:
+        recs.append(
+            "To reduce inequality and improve stability, try **raising tax and UBI slightly** "
+            "(e.g., +0.03 to tax and +0.05 to UBI) while keeping education stable."
+        )
+    elif gini < 0.30 and gdp < 1200:
+        recs.append(
+            "Inequality is already relatively low, but GDP is modest. "
+            "You could **ease taxes slightly** and **boost education** to explore growth."
+        )
+
+    # Emissions
+    if emis > 5.0:
+        recs.append(
+            "Emissions are high. Explore **tightening the resource cap** and/or increasing "
+            "education to see if innovation-driven green growth can offset the drag."
+        )
+    elif emis < 1.5 and gdp is not None and gdp < 1500:
+        recs.append(
+            "Emissions are low but GDP is modest. It may be safe to **loosen the resource cap** a bit "
+            "to see if you can gain growth without losing too much on the climate side."
+        )
+
+    # Innovation
+    if inn < 0.25:
+        recs.append(
+            "Innovation is relatively low. Consider **raising education spend** and turning on "
+            "**policy feedback** so the system can adjust over time."
+        )
+    elif inn > 0.6 and emis > 3.0:
+        recs.append(
+            "Innovation is high but emissions are elevated. Try combining this with **stronger caps** "
+            "to see if green sector growth can keep GDP stable."
+        )
+
+    # Shocks
+    if not recession or not climate_shock:
+        recs.append(
+            "Once you like a baseline, **add a recession or climate shock** to test the resilience "
+            "of your policy mix."
+        )
+
+    # Policy feedback
+    if not adapt_policies:
+        recs.append(
+            "Enable **Adaptive government (policy feedback)** to see how an algorithmic policymaker "
+            "would gradually adjust tax, UBI, education, and caps."
+        )
+
+    if not recs:
+        recs.append(
+            "This configuration looks balanced. Next, try **changing one lever at a time** "
+            "(e.g., +0.05 tax or +0.03 UBI) and compare paths in the **Compare Scenarios** tab."
+        )
+
+    return recs
+
+
 def build_policy_brief_lines(
     scenario_name: str,
     params: Dict[str, Any],
@@ -332,6 +497,11 @@ def build_policy_brief_lines(
         lines.append(f"- Stability: {float(last['stability']):.3f}")
         lines.append(f"- Innovation: {float(last['innovation']):.3f}")
         lines.append(f"- Emissions: {float(last['emissions']):.3f}")
+        if "gdp_industry" in df.columns:
+            lines.append(
+                f"- Sector GDP (industry / services / green): "
+                f"{float(last['gdp_industry']):.1f} / {float(last['gdp_services']):.1f} / {float(last['gdp_green']):.1f}"
+            )
         if "tax_rate" in df.columns:
             lines.append("")
             lines.append("Final Policy Levels (after feedback):")
@@ -383,6 +553,9 @@ def add_run_to_history(
     st.session_state["run_history"] = st.session_state["run_history"][:10]
 
 
+# Apply query params only once per session (for shareable URLs)
+_apply_query_params_once()
+
 # ---------------------------
 # Header & Intro Section
 # ---------------------------
@@ -410,7 +583,7 @@ with header_right:
     st.markdown(
         """
         <div style="text-align:right; font-size: 12px; color:#6B7280;">
-        v1.2 • Simulation sandbox (educational & exploratory)
+        v1.3 • Simulation sandbox (educational & exploratory)
         </div>
         """,
         unsafe_allow_html=True,
@@ -459,7 +632,7 @@ with st.expander("How the model works", expanded=False):
     st.markdown(
         """
         - The world contains a stylized population, firms, and a government.  
-        - Policies influence income, redistribution, innovation, emissions, and stability.  
+        - Policies influence income, redistribution, innovation, emissions, stability, and sectors.  
         - Each **tick** represents a time step where the system evolves.  
         - Metrics are proxies, calibrated for exploration rather than precise forecasts.
         """.strip()
@@ -545,7 +718,7 @@ with st.sidebar:
         "Simulation ticks",
         min_value=50,
         max_value=5000,
-        value=200,
+        value=st.session_state.get("single_ticks", 200),
         step=50,
         help="Higher values simulate longer time horizons.",
         key="single_ticks",
@@ -555,7 +728,7 @@ with st.sidebar:
         "Population size (agents)",
         min_value=100,
         max_value=5000,
-        value=500,
+        value=st.session_state.get("population_size", 500),
         step=100,
         help="Larger populations are more realistic but slower to simulate.",
         key="population_size",
@@ -565,14 +738,14 @@ with st.sidebar:
 
     enable_recession = st.checkbox(
         "Mid-run economic recession",
-        value=False,
+        value=st.session_state.get("enable_recession", False),
         help="At halfway through the simulation, GDP and stability take a temporary hit.",
         key="enable_recession",
     )
 
     enable_climate_shock = st.checkbox(
         "Late climate shock",
-        value=False,
+        value=st.session_state.get("enable_climate_shock", False),
         help="Near the end of the run, emissions spike and stability suffers.",
         key="enable_climate_shock",
     )
@@ -581,7 +754,7 @@ with st.sidebar:
 
     enable_policy_feedback = st.checkbox(
         "Adaptive government (policy feedback)",
-        value=False,
+        value=st.session_state.get("enable_policy_feedback", False),
         help="Allow the government to nudge tax, UBI, education, and resource caps "
              "in response to inequality, growth, emissions, and stability.",
         key="enable_policy_feedback",
@@ -674,9 +847,57 @@ with st.sidebar:
 # Tabs: Main Sections
 # ---------------------------
 
-tab_single, tab_compare, tab_history, tab_dev, tab_dist = st.tabs(
-    ["Single Scenario", "Compare Scenarios", "Run History", "Developer View", "Distributions"]
+tab_overview, tab_single, tab_compare, tab_history, tab_dev, tab_dist, tab_sectors = st.tabs(
+    [
+        "Overview",
+        "Single Scenario",
+        "Compare Scenarios",
+        "Run History",
+        "Developer View",
+        "Distributions",
+        "Sectors",
+    ]
 )
+
+# ==============
+# TAB 0: OVERVIEW
+# ==============
+with tab_overview:
+    st.markdown(
+        """
+        ### 🧭 What is OriginForge?
+
+        OriginForge is an **AI-inspired civilization sandbox** for exploring how policy levers like
+        tax, UBI, education, and resource caps shape a virtual society over time.
+
+        It is designed for:
+
+        - 🎓 **Policy schools & grad programs** — teaching trade-offs and dynamic effects  
+        - 🧠 **Think tanks & NGOs** — stress-testing ideas before building full models  
+        - 🏢 **Strategy & foresight teams** — running "what if" experiments quickly  
+
+        ---
+        ### 🧪 Example questions you can explore
+
+        - What happens if we **raise UBI** while keeping taxes moderate?  
+        - Can we **cut emissions** with strong caps and still keep GDP growing?  
+        - How do **education investments** change innovation and stability over time?  
+        - What policy mix is **more resilient** to a recession or climate shock?  
+
+        ---
+        ### 🚀 How to use this app
+
+        1. Go to **Single Scenario** and either pick a preset or use **Custom (use sliders)**.  
+        2. Choose **ticks** (time horizon) and **population size** in the left sidebar.  
+        3. Optionally enable **recession / climate shocks** and **policy feedback**.  
+        4. Click **Run single scenario** to generate metrics, a narrative, and exports.  
+        5. Use **Compare Scenarios** to contrast different policy regimes.  
+        6. Explore **Distributions** and **Sectors** to see structural effects.  
+
+        This sandbox is **exploratory**, not predictive — it is meant to help conversation,
+        hypothesis-building, and teaching.
+        """.strip()
+    )
 
 # ==============
 # TAB 1: SINGLE
@@ -849,6 +1070,17 @@ with tab_single:
                     adapt_policies=bool(enable_policy_feedback),
                 )
                 st.markdown(insight_md)
+
+                st.markdown("### Suggested next experiments")
+                recs = recommend_next_steps(
+                    df,
+                    params_single,
+                    recession=bool(enable_recession),
+                    climate_shock=bool(enable_climate_shock),
+                    adapt_policies=bool(enable_policy_feedback),
+                )
+                for r in recs:
+                    st.markdown(f"- {r}")
 
                 st.markdown("### Export results")
                 csv_data = df.to_csv(index=False).encode("utf-8")
@@ -1180,3 +1412,80 @@ with tab_dist:
         with col_stab:
             st.subheader("Stability distribution (synthetic)")
             st.bar_chart(pd.Series(stability_vals, name="stability"))
+
+# ===================
+# TAB 6: SECTORS
+# ===================
+with tab_sectors:
+    st.markdown(
+        """
+        #### 🏗 Sector View  
+        See how industry, services, and green sectors contribute to total GDP over time.
+        """.strip()
+    )
+
+    last_run = st.session_state.get("last_single_run", None)
+    if last_run is None:
+        st.info("Run a single scenario first to see sector trends.")
+    else:
+        df_last: pd.DataFrame = last_run["df"]
+
+        required_cols = {"gdp_industry", "gdp_services", "gdp_green"}
+        if not required_cols.issubset(df_last.columns):
+            st.warning(
+                "Sector data is not available for this run. "
+                "Try rerunning a scenario to regenerate metrics."
+            )
+        else:
+            fig_sect = go.Figure()
+            fig_sect.add_trace(
+                go.Scatter(
+                    x=df_last["tick"],
+                    y=df_last["gdp_industry"],
+                    stackgroup="one",
+                    name="Industry",
+                )
+            )
+            fig_sect.add_trace(
+                go.Scatter(
+                    x=df_last["tick"],
+                    y=df_last["gdp_services"],
+                    stackgroup="one",
+                    name="Services",
+                )
+            )
+            fig_sect.add_trace(
+                go.Scatter(
+                    x=df_last["tick"],
+                    y=df_last["gdp_green"],
+                    stackgroup="one",
+                    name="Green",
+                )
+            )
+            fig_sect.update_layout(
+                height=420,
+                margin=dict(l=10, r=10, t=30, b=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                yaxis_title="Sector GDP (proxy)",
+            )
+            st.plotly_chart(fig_sect, use_container_width=True)
+
+            with st.expander("Final sector snapshot", expanded=False):
+                last_row = df_last.iloc[-1]
+                total_gdp = float(last_row["gdp"]) if "gdp" in df_last.columns else None
+                if total_gdp and total_gdp > 0:
+                    st.write(
+                        {
+                            "Industry share": f"{100.0 * float(last_row['gdp_industry']) / total_gdp:.1f}%",
+                            "Services share": f"{100.0 * float(last_row['gdp_services']) / total_gdp:.1f}%",
+                            "Green share": f"{100.0 * float(last_row['gdp_green']) / total_gdp:.1f}%",
+                        }
+                    )
+                else:
+                    st.write(
+                        {
+                            "Industry": float(last_row["gdp_industry"]),
+                            "Services": float(last_row["gdp_services"]),
+                            "Green": float(last_row["gdp_green"]),
+                        }
+                    )
