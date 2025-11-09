@@ -1,7 +1,10 @@
 [theme]
-primaryColor = "#0A84FF"
-backgroundColor = "#020617"
-secondaryBackgroundColor = "#020617"
-textColor = "#F9FAFB"
+# A modern, data-product look
+primaryColor = "#2563EB"              # Blue
+backgroundColor = "#020617"           # Very dark slate
+secondaryBackgroundColor = "#020617"  # Keep panels unified
+textColor = "#F9FAFB"                 # Near-white
 font = "sans serif"
 
+[client]
+toolbarMode = "minimal"
