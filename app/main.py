@@ -1,7 +1,9 @@
 import streamlit as st
 import plotly.graph_objects as go
+import pandas as pd
 from world import World
 from utils import export_csv, export_pdf  # reserved for future PDF feature
+
 
 st.set_page_config(page_title="OriginForge Policy Sandbox", layout="wide")
 st.title("🌍 OriginForge — Policy Sandbox (Web MVP)")
