@@ -1,8 +1,9 @@
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
+
 from world import World
-from utils import export_csv, export_pdf  # reserved for future PDF feature
+from utils import export_csv, export_pdf_bytes
 
 st.set_page_config(page_title="OriginForge Policy Sandbox", layout="wide")
 st.title("🌍 OriginForge — Policy Sandbox (Web MVP)")
@@ -108,6 +109,48 @@ def describe_single_run(df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
+def build_policy_brief_lines(
+    scenario_name: str,
+    params: dict,
+    ticks: int,
+    df: pd.DataFrame,
+    insight_md: str,
+):
+    """Convert run info + insight into a list of plain text lines for the PDF."""
+    lines = []
+    lines.append(f"Scenario: {scenario_name}")
+    lines.append(f"Ticks simulated: {int(ticks)}")
+    lines.append("")
+    lines.append("Policy Parameters:")
+    lines.append(f"- Tax rate: {params['tax']:.3f}")
+    lines.append(f"- UBI (fraction of median income): {params['ubi']:.3f}")
+    lines.append(f"- Education (GDP share): {params['edu']:.3f}")
+    lines.append(f"- Resource cap: {params['cap']:.3f}")
+    lines.append(f"- Regime: {params['regime']}")
+    lines.append("")
+
+    if not df.empty:
+        last = df.iloc[-1]
+        lines.append("Final Metrics:")
+        lines.append(f"- GDP (proxy): {last['gdp']:.2f}")
+        lines.append(f"- Inequality (Gini proxy): {last['gini_proxy']:.3f}")
+        lines.append(f"- Stability: {last['stability']:.3f}")
+        lines.append(f"- Innovation: {last['innovation']:.3f}")
+        lines.append(f"- Emissions: {last['emissions']:.3f}")
+        lines.append("")
+    else:
+        lines.append("No metrics available (empty run).")
+        lines.append("")
+
+    lines.append("Quick Insight:")
+    # Convert markdown bullets to plain text
+    for line in insight_md.splitlines():
+        plain = line.replace("• ", "- ").replace("**", "")
+        lines.append(plain)
+
+    return lines
+
+
 # --- UI: Tabs ---
 tab_single, tab_compare = st.tabs(["Single Scenario", "Compare Scenarios"])
 
@@ -193,18 +236,37 @@ with tab_single:
             st.metric("Innovation", f'{last["innovation"]:.3f}')
             st.metric("Emissions", f'{last["emissions"]:.3f}')
 
-        # --- NEW: Textual insight ---
+        # --- Textual insight ---
         st.markdown("### Quick Insight (Single Scenario)")
-        st.markdown(describe_single_run(df))
+        insight_md = describe_single_run(df)
+        st.markdown(insight_md)
 
-        # --- CSV download ---
+        # --- Exports ---
         st.subheader("Exports")
+
+        # CSV export
         csv_data = df.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="⬇️ Download data as CSV",
             data=csv_data,
             file_name="originforge_single_run.csv",
             mime="text/csv",
+        )
+
+        # PDF policy brief export
+        brief_lines = build_policy_brief_lines(
+            scenario_name=scenario,
+            params=params_single,
+            ticks=ticks,
+            df=df,
+            insight_md=insight_md,
+        )
+        pdf_bytes = export_pdf_bytes(brief_lines)
+        st.download_button(
+            label="📄 Download Policy Brief (PDF)",
+            data=pdf_bytes,
+            file_name="originforge_policy_brief.pdf",
+            mime="application/pdf",
         )
 
 # ===================
