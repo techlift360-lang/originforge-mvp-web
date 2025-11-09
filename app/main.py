@@ -1,5 +1,21 @@
+"""
+OriginForge — Policy Sandbox (Streamlit Front-End)
+
+This module defines the full Streamlit app for:
+- Single-scenario simulations (with presets + custom sliders)
+- Scenario comparison (A vs B)
+- Run history (session)
+- Developer view (JSON payload for the last single run)
+
+Backed by:
+- world.World          -> simulation engine
+- utils.export_pdf_bytes -> PDF policy brief generation
+"""
+
+from __future__ import annotations
+
 import json
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -9,26 +25,27 @@ from world import World
 from utils import export_pdf_bytes
 
 # ---------------------------
-# Page Config & Global Setup
+# Page Config & Session Setup
 # ---------------------------
+
 st.set_page_config(
     page_title="OriginForge — Policy Sandbox",
     page_icon="🌍",
     layout="wide",
 )
 
-# Initialize run history and last run in session state
+# Initialize session state keys
 if "run_history" not in st.session_state:
-    st.session_state["run_history"] = []  # list of dicts
+    st.session_state["run_history"]: List[Dict[str, Any]] = []
 
 if "last_single_run" not in st.session_state:
-    st.session_state["last_single_run"] = None  # dict with name, params, ticks, df
-
+    st.session_state["last_single_run"]: Optional[Dict[str, Any]] = None
 
 # ---------------------------
-# Constants & Scenario Config
+# Preset Scenario Definitions
 # ---------------------------
-SCENARIOS: Dict[str, Dict[str, Any] | None] = {
+
+SCENARIOS: Dict[str, Optional[Dict[str, Any]]] = {
     "Custom (use sliders)": None,
     "High UBI Safety Net": {
         "tax": 0.28,
@@ -53,10 +70,10 @@ SCENARIOS: Dict[str, Dict[str, Any] | None] = {
     },
 }
 
-
 # ---------------------------
 # Helper Functions
 # ---------------------------
+
 @st.cache_data(show_spinner=False)
 def run_world_with_params_cached(
     tax: float,
@@ -68,8 +85,12 @@ def run_world_with_params_cached(
 ) -> pd.DataFrame:
     """
     Cached simulation runner.
-    Same parameters + ticks -> instantly returns cached result.
+
+    Same parameters + ticks -> instantly returns cached results.
     """
+    # Basic safety guard
+    ticks = max(1, min(int(ticks), 5000))
+
     world = World(
         tax_rate=tax,
         ubi_rate=ubi,
@@ -77,42 +98,48 @@ def run_world_with_params_cached(
         resource_cap=cap,
         regime=regime,
     )
-    df = world.run(ticks=int(ticks))
+    df = world.run(ticks=ticks)
     return df
 
 
 def get_params_for_scenario(name: str, sliders: Dict[str, Any]) -> Dict[str, Any]:
-    """Return params dict given a scenario name and slider values."""
+    """
+    Resolve the effective parameters, either from a preset scenario
+    or from the current slider values (Custom mode).
+    """
     if SCENARIOS[name] is None:
         # Custom mode: use sliders
         return {
-            "tax": sliders["tax"],
-            "ubi": sliders["ubi"],
-            "edu": sliders["edu"],
-            "cap": sliders["cap"],
-            "regime": sliders["regime"],
+            "tax": float(sliders["tax"]),
+            "ubi": float(sliders["ubi"]),
+            "edu": float(sliders["edu"]),
+            "cap": float(sliders["cap"]),
+            "regime": str(sliders["regime"]),
         }
-    else:
-        return SCENARIOS[name]  # type: ignore
+    return SCENARIOS[name].copy()  # type: ignore[return-value]
 
 
 def pct_change(new: float, old: float) -> float:
+    """Safe percent change helper."""
     if old == 0:
         return 0.0
     return 100.0 * (new - old) / abs(old)
 
 
 def describe_single_run(df: pd.DataFrame) -> str:
-    """Create a simple human-readable summary for a single scenario run."""
-    if df.empty:
-        return "No data to summarize."
+    """
+    Create a human-readable summary for a single scenario run.
+    Uses first vs last row to describe trends.
+    """
+    if df.empty or len(df) < 2:
+        return "Not enough data to summarize."
 
     first = df.iloc[0]
     last = df.iloc[-1]
 
-    gdp_change = pct_change(last["gdp"], first["gdp"])
-    gini_change = pct_change(last["gini_proxy"], first["gini_proxy"])
-    stab_change = pct_change(last["stability"], first["stability"])
+    gdp_change = pct_change(float(last["gdp"]), float(first["gdp"]))
+    gini_change = pct_change(float(last["gini_proxy"]), float(first["gini_proxy"]))
+    stab_change = pct_change(float(last["stability"]), float(first["stability"]))
 
     lines: List[str] = []
 
@@ -150,7 +177,9 @@ def build_policy_brief_lines(
     df: pd.DataFrame,
     insight_md: str,
 ) -> List[str]:
-    """Convert run info + insight into a list of plain text lines for the PDF."""
+    """
+    Convert run info + insight into a list of plain-text lines for PDF export.
+    """
     lines: List[str] = []
     lines.append(f"Scenario: {scenario_name}")
     lines.append(f"Ticks simulated: {int(ticks)}")
@@ -166,18 +195,18 @@ def build_policy_brief_lines(
     if not df.empty:
         last = df.iloc[-1]
         lines.append("Final Metrics:")
-        lines.append(f"- GDP (proxy): {last['gdp']:.2f}")
-        lines.append(f"- Inequality (Gini proxy): {last['gini_proxy']:.3f}")
-        lines.append(f"- Stability: {last['stability']:.3f}")
-        lines.append(f"- Innovation: {last['innovation']:.3f}")
-        lines.append(f"- Emissions: {last['emissions']:.3f}")
+        lines.append(f"- GDP (proxy): {float(last['gdp']):.2f}")
+        lines.append(f"- Inequality (Gini proxy): {float(last['gini_proxy']):.3f}")
+        lines.append(f"- Stability: {float(last['stability']):.3f}")
+        lines.append(f"- Innovation: {float(last['innovation']):.3f}")
+        lines.append(f"- Emissions: {float(last['emissions']):.3f}")
         lines.append("")
     else:
         lines.append("No metrics available (empty run).")
         lines.append("")
 
     lines.append("Quick Insight:")
-    # Convert markdown bullets to plain text
+    # Convert markdown bullets to plain text for PDF
     for line in insight_md.splitlines():
         plain = line.replace("• ", "- ").replace("**", "")
         lines.append(plain)
@@ -186,9 +215,12 @@ def build_policy_brief_lines(
 
 
 def add_run_to_history(name: str, params: Dict[str, Any], df: pd.DataFrame) -> None:
-    """Store a compact summary of the run in session history."""
+    """
+    Store a compact summary of the run in session history.
+    """
     if df.empty:
         return
+
     last = df.iloc[-1]
     st.session_state["run_history"].insert(
         0,
@@ -199,9 +231,9 @@ def add_run_to_history(name: str, params: Dict[str, Any], df: pd.DataFrame) -> N
             "Edu": round(params["edu"], 3),
             "Cap": round(params["cap"], 3),
             "Regime": params["regime"],
-            "Final GDP": round(last["gdp"], 1),
-            "Final Gini": round(last["gini_proxy"], 3),
-            "Final Stability": round(last["stability"], 3),
+            "Final GDP": round(float(last["gdp"]), 1),
+            "Final Gini": round(float(last["gini_proxy"]), 3),
+            "Final Stability": round(float(last["stability"]), 3),
         },
     )
     # keep only last 10
@@ -209,8 +241,9 @@ def add_run_to_history(name: str, params: Dict[str, Any], df: pd.DataFrame) -> N
 
 
 # ---------------------------
-# Layout: Header & About
+# Header & Intro Section
 # ---------------------------
+
 header_left, header_right = st.columns([3, 1])
 
 with header_left:
@@ -218,8 +251,7 @@ with header_left:
         """
         ### 🌍 OriginForge — Policy Sandbox  
         Explore how tax, UBI, education, and resource policies shape a virtual society over time.
-        """,
-        unsafe_allow_html=False,
+        """.strip()
     )
 
 with header_right:
@@ -232,7 +264,17 @@ with header_right:
         unsafe_allow_html=True,
     )
 
-with st.expander("ℹ️ About & disclaimer", expanded=False):
+with st.expander("How it works", expanded=False):
+    st.markdown(
+        """
+        1. Choose a **preset** or adjust **policy sliders** in the sidebar.  
+        2. Run a **single scenario** to see how GDP, inequality, stability, innovation, and emissions evolve.  
+        3. Use **Compare Scenarios** to contrast two policy regimes.  
+        4. Export results as **CSV, PDF policy brief, or JSON** for deeper analysis.
+        """.strip()
+    )
+
+with st.expander("About & disclaimer", expanded=False):
     st.markdown(
         """
         **OriginForge** is a policy *sandbox* that models a simplified virtual economy.  
@@ -241,48 +283,78 @@ with st.expander("ℹ️ About & disclaimer", expanded=False):
         """.strip()
     )
 
-
 # ---------------------------
 # Sidebar: Global Controls
 # ---------------------------
+
 with st.sidebar:
     st.markdown("## ⚙️ Scenario Controls")
 
     scenario_name_input = st.text_input(
         "Scenario name",
         value="My Scenario",
-        help="This name will appear in the policy brief and run history.",
+        help="This name will appear in the policy brief, run history, and JSON payload.",
     )
 
     scenario_preset = st.selectbox(
         "Preset",
         list(SCENARIOS.keys()),
-        help="Choose a preset, or 'Custom' to use the sliders below.",
+        help="Choose a preset, or 'Custom (use sliders)' to use the sliders below.",
         key="single_scenario",
     )
 
     st.markdown("**Policy sliders (used in Custom mode)**")
 
-    tax = st.slider("Tax rate", 0.0, 0.50, 0.20, 0.01, key="single_tax")
+    tax = st.slider(
+        "Tax rate",
+        0.0,
+        0.50,
+        0.20,
+        0.01,
+        help="Higher tax can reduce GDP growth but may support redistribution.",
+        key="single_tax",
+    )
     ubi = st.slider(
-        "UBI (fraction of median income)", 0.0, 0.30, 0.10, 0.01, key="single_ubi"
+        "UBI (fraction of median income)",
+        0.0,
+        0.30,
+        0.10,
+        0.01,
+        help="Universal Basic Income as a fraction of median wage.",
+        key="single_ubi",
     )
     edu = st.slider(
-        "Education spend (GDP share)", 0.0, 0.10, 0.05, 0.01, key="single_edu"
+        "Education spend (GDP share)",
+        0.0,
+        0.10,
+        0.05,
+        0.01,
+        help="Public education investment as a share of GDP.",
+        key="single_edu",
     )
     cap = st.slider(
-        "Resource cap (reduction)", 0.0, 0.40, 0.20, 0.01, key="single_cap"
+        "Resource cap (reduction)",
+        0.0,
+        0.40,
+        0.20,
+        0.01,
+        help="Stronger caps reduce emissions but can lower output.",
+        key="single_cap",
     )
     regime = st.selectbox(
-        "Regime", ["democracy", "autocracy"], key="single_regime"
+        "Regime",
+        ["democracy", "autocracy"],
+        help="Regime affects baseline stability in this model.",
+        key="single_regime",
     )
 
     ticks = st.number_input(
         "Simulation ticks",
         min_value=50,
-        max_value=2000,
+        max_value=5000,
         value=200,
         step=50,
+        help="Think of ticks as time steps (e.g., months or years).",
         key="single_ticks",
     )
 
@@ -308,28 +380,38 @@ with st.sidebar:
     )
 
     uploaded = st.file_uploader(
-        "Load config (JSON)", type=["json"], key="config_uploader"
+        "Load config (JSON)",
+        type=["json"],
+        key="config_uploader",
     )
     if uploaded is not None:
         try:
             loaded_cfg = json.loads(uploaded.read().decode("utf-8"))
+            # minimal validation
+            if not isinstance(loaded_cfg, dict):
+                raise ValueError("Config must be a JSON object.")
+
             st.session_state["single_scenario"] = loaded_cfg.get(
                 "scenario", scenario_preset
             )
-            st.session_state["single_tax"] = loaded_cfg.get("tax", tax)
-            st.session_state["single_ubi"] = loaded_cfg.get("ubi", ubi)
-            st.session_state["single_edu"] = loaded_cfg.get("edu", edu)
-            st.session_state["single_cap"] = loaded_cfg.get("cap", cap)
-            st.session_state["single_regime"] = loaded_cfg.get("regime", regime)
-            st.session_state["single_ticks"] = loaded_cfg.get("ticks", ticks)
+            st.session_state["single_tax"] = float(loaded_cfg.get("tax", tax))
+            st.session_state["single_ubi"] = float(loaded_cfg.get("ubi", ubi))
+            st.session_state["single_edu"] = float(loaded_cfg.get("edu", edu))
+            st.session_state["single_cap"] = float(loaded_cfg.get("cap", cap))
+            st.session_state["single_regime"] = str(
+                loaded_cfg.get("regime", regime)
+            )
+            st.session_state["single_ticks"] = int(
+                loaded_cfg.get("ticks", ticks)
+            )
             st.success("Config loaded. Sliders will reflect values on next rerun.")
         except Exception as e:
             st.error(f"Could not load config: {e}")
 
+# ---------------------------
+# Tabs: Main Sections
+# ---------------------------
 
-# ---------------------------
-# Tabs: Single vs Compare vs History vs Dev
-# ---------------------------
 tab_single, tab_compare, tab_history, tab_dev = st.tabs(
     ["Single Scenario", "Compare Scenarios", "Run History", "Developer View"]
 )
@@ -366,7 +448,6 @@ with tab_single:
 
         if not df.empty:
             add_run_to_history(scenario_name_input, params_single, df)
-            # store detailed last run for Developer View
             st.session_state["last_single_run"] = {
                 "name": scenario_name_input,
                 "params": params_single,
@@ -397,17 +478,19 @@ with tab_single:
                     go.Scatter(x=df["tick"], y=df["emissions"], name="Emissions")
                 )
                 fig.update_layout(
-                    height=450, margin=dict(l=10, r=10, t=30, b=10)
+                    height=450,
+                    margin=dict(l=10, r=10, t=30, b=10),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
                 with st.expander("Advanced view: final snapshot", expanded=False):
                     c1, c2 = st.columns(2)
-                    last = df.iloc[-1]
-                    c1.metric("Final GDP", f"{last['gdp']:.1f}")
-                    c1.metric("Final Emissions", f"{last['emissions']:.1f}")
-                    c2.metric("Final Gini", f"{last['gini_proxy']:.3f}")
-                    c2.metric("Final Stability", f"{last['stability']:.3f}")
+                    last_row = df.iloc[-1]
+                    c1.metric("Final GDP", f"{float(last_row['gdp']):.1f}")
+                    c1.metric("Final Emissions", f"{float(last_row['emissions']):.1f}")
+                    c2.metric("Final Gini", f"{float(last_row['gini_proxy']):.3f}")
+                    c2.metric("Final Stability", f"{float(last_row['stability']):.3f}")
 
                 st.markdown("### Parameters used")
                 st.write(
@@ -428,11 +511,11 @@ with tab_single:
                 st.subheader("Summary snapshot")
                 last = df.iloc[-1].to_dict()
                 st.metric("Population", f'{int(last["population"])}')
-                st.metric("GDP (proxy)", f'{last["gdp"]:.1f}')
-                st.metric("Inequality (Gini)", f'{last["gini_proxy"]:.3f}')
-                st.metric("Stability", f'{last["stability"]:.3f}')
-                st.metric("Innovation", f'{last["innovation"]:.3f}')
-                st.metric("Emissions", f'{last["emissions"]:.3f}')
+                st.metric("GDP (proxy)", f'{float(last["gdp"]):.1f}')
+                st.metric("Inequality (Gini)", f'{float(last["gini_proxy"]):.3f}')
+                st.metric("Stability", f'{float(last["stability"]):.3f}')
+                st.metric("Innovation", f'{float(last["innovation"]):.3f}')
+                st.metric("Emissions", f'{float(last["emissions"]):.3f}')
 
                 st.markdown("### Quick insight")
                 insight_md = describe_single_run(df)
@@ -493,17 +576,18 @@ with tab_compare:
     ticks_cmp = st.number_input(
         "Simulation ticks (both scenarios)",
         min_value=50,
-        max_value=2000,
+        max_value=5000,
         value=300,
         step=50,
+        help="Both scenarios will run for the same number of ticks.",
         key="compare_ticks",
     )
 
     if st.button("▶️ Run comparison"):
         with st.spinner("Running comparison…"):
             try:
-                params_A = SCENARIOS[scenario_A]  # type: ignore
-                params_B = SCENARIOS[scenario_B]  # type: ignore
+                params_A = SCENARIOS[scenario_A]  # type: ignore[assignment]
+                params_B = SCENARIOS[scenario_B]  # type: ignore[assignment]
 
                 df_A = run_world_with_params_cached(
                     params_A["tax"],
@@ -540,7 +624,9 @@ with tab_compare:
                 )
             )
             fig_gdp.update_layout(
-                height=380, margin=dict(l=10, r=10, t=30, b=10)
+                height=380,
+                margin=dict(l=10, r=10, t=30, b=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
             )
             st.plotly_chart(fig_gdp, use_container_width=True)
 
@@ -562,7 +648,9 @@ with tab_compare:
                 )
             )
             fig_gini.update_layout(
-                height=380, margin=dict(l=10, r=10, t=30, b=10)
+                height=380,
+                margin=dict(l=10, r=10, t=30, b=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
             )
             st.plotly_chart(fig_gini, use_container_width=True)
 
@@ -570,28 +658,32 @@ with tab_compare:
             last_A = df_A.iloc[-1]
             last_B = df_B.iloc[-1]
 
-            gdp_diff = last_B["gdp"] - last_A["gdp"]
-            gini_diff = last_B["gini_proxy"] - last_A["gini_proxy"]
+            gdp_diff = float(last_B["gdp"]) - float(last_A["gdp"])
+            gini_diff = float(last_B["gini_proxy"]) - float(last_A["gini_proxy"])
 
             st.markdown("### Quick comparison insight")
             insight_lines: List[str] = []
 
             if gdp_diff > 0:
                 insight_lines.append(
-                    f"**{scenario_B}** ends with **higher GDP** than **{scenario_A}** by {gdp_diff:,.1f} units."
+                    f"**{scenario_B}** ends with **higher GDP** than **{scenario_A}** "
+                    f"by {gdp_diff:,.1f} units."
                 )
             else:
                 insight_lines.append(
-                    f"**{scenario_A}** ends with **higher GDP** than **{scenario_B}** by {abs(gdp_diff):,.1f} units."
+                    f"**{scenario_A}** ends with **higher GDP** than **{scenario_B}** "
+                    f"by {abs(gdp_diff):,.1f} units."
                 )
 
             if gini_diff > 0:
                 insight_lines.append(
-                    f"**{scenario_B}** ends with **higher inequality (Gini)** than **{scenario_A}** by {gini_diff:.3f}."
+                    f"**{scenario_B}** ends with **higher inequality (Gini)** than "
+                    f"**{scenario_A}** by {gini_diff:.3f}."
                 )
             else:
                 insight_lines.append(
-                    f"**{scenario_A}** ends with **higher inequality (Gini)** than **{scenario_B}** by {abs(gini_diff):.3f}."
+                    f"**{scenario_A}** ends with **higher inequality (Gini)** than "
+                    f"**{scenario_B}** by {abs(gini_diff):.3f}."
                 )
 
             st.write("\n\n".join(insight_lines))
@@ -640,7 +732,7 @@ with tab_dev:
     if last_run is None:
         st.info("No single scenario run in this session yet. Run one first.")
     else:
-        df_last = last_run["df"]
+        df_last: pd.DataFrame = last_run["df"]
         preview_records = df_last.head(10).to_dict(orient="records")
 
         payload = {
