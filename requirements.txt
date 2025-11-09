@@ -1,7 +1,7 @@
-streamlit
-mesa
-numpy
-plotly
-pandas
-reportlab
-python-dotenv
+streamlit==1.39.0
+pandas==2.2.2
+plotly==5.24.0
+jinja2==3.1.4
+weasyprint==62.3
+reportlab==4.2.2
+numpy==1.26.4
