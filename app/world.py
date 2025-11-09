@@ -8,6 +8,7 @@ This is a stylized, toy model of a "world" with:
 - Macro metrics: GDP, inequality (Gini proxy), stability, innovation, emissions
 - Policy levers: tax_rate, ubi_rate, education_spend, resource_cap, regime
 - Optional shocks: recession, climate_shock
+- Optional policy feedback: government adapts policies over time
 
 It is designed for:
 - Educational use
@@ -69,6 +70,10 @@ class World:
         self.stability = 0.7
         self.innovation = 0.3
         self.emissions = 1.0
+
+        # A simple "memory" / frustration index (0–1)
+        # Higher when inequality is high and stability is low
+        self.frustration = 0.3
 
         # Small random seed for reproducibility of noise
         random.seed(42)
@@ -168,6 +173,62 @@ class World:
         self.emissions *= (1.0 + emissions_growth + emissions_noise)
         self.emissions = max(0.1, min(self.emissions, 100.0))
 
+    def _update_frustration(self) -> None:
+        """
+        Update a simple "frustration" index (0–1) based on inequality and stability.
+        This acts like a memory of how citizens feel over time.
+        """
+        # Higher inequality -> more frustration
+        # Higher stability -> less frustration
+        self.frustration += 0.02 * (self.gini - 0.35)
+        self.frustration -= 0.02 * (self.stability - 0.7)
+        self.frustration = max(0.0, min(self.frustration, 1.0))
+
+    def _adapt_policies(self, gdp_growth_real: float) -> None:
+        """
+        Very simple "policy feedback" system:
+        - If inequality is high, government nudges tax and UBI up.
+        - If GDP growth is weak/negative, it eases tax and boosts education.
+        - If emissions are high, it tightens resource caps.
+        - If stability is low, it boosts UBI and education.
+        All adjustments are small per tick, creating slow-moving policy paths.
+        """
+        cfg = self.config
+
+        # Inequality-driven adjustments
+        if self.gini > 0.42:
+            cfg.tax_rate += 0.0008
+            cfg.ubi_rate += 0.0008
+        elif self.gini < 0.30:
+            cfg.tax_rate -= 0.0006
+            cfg.ubi_rate -= 0.0004
+
+        # Growth-driven adjustments
+        if gdp_growth_real < -0.002:  # strong contraction
+            cfg.tax_rate -= 0.0010
+            cfg.education_spend += 0.0008
+        elif gdp_growth_real < 0.002:  # weak growth
+            cfg.education_spend += 0.0003
+
+        # Emissions-driven adjustments
+        if self.emissions > 5.0:
+            cfg.resource_cap += 0.0009
+        elif self.emissions < 1.5:
+            cfg.resource_cap -= 0.0004
+
+        # Stability-driven adjustments (via frustration)
+        if self.frustration > 0.6:
+            cfg.ubi_rate += 0.0007
+            cfg.education_spend += 0.0005
+        elif self.frustration < 0.3:
+            cfg.resource_cap -= 0.0003
+
+        # Clamp policies to allowed ranges
+        cfg.tax_rate = float(max(0.0, min(cfg.tax_rate, 0.50)))
+        cfg.ubi_rate = float(max(0.0, min(cfg.ubi_rate, 0.30)))
+        cfg.education_spend = float(max(0.0, min(cfg.education_spend, 0.10)))
+        cfg.resource_cap = float(max(0.0, min(cfg.resource_cap, 0.40)))
+
     # ------------------------------------------------------------------ #
     # Public API
     # ------------------------------------------------------------------ #
@@ -177,6 +238,7 @@ class World:
         ticks: int,
         recession: bool = False,
         climate_shock: bool = False,
+        adapt_policies: bool = False,
     ) -> pd.DataFrame:
         """
         Run the world forward for a given number of ticks, recording metrics.
@@ -184,12 +246,17 @@ class World:
         Shocks:
         - recession: one-time GDP & stability hit at mid-run.
         - climate_shock: emissions spike & stability hit at 80% of the run.
+
+        If adapt_policies is True, the government gradually adjusts tax, UBI,
+        education, and resource caps based on current conditions.
         """
         ticks = max(1, min(int(ticks), 5000))
 
         records: List[Dict[str, Any]] = []
 
         for t in range(ticks):
+            prev_gdp = self.gdp
+
             # 1) Apply normal policy-driven dynamics
             self._apply_policy_effects()
 
@@ -204,7 +271,19 @@ class World:
                 self.emissions *= 1.3
                 self.stability *= 0.9
 
-            # 3) Record snapshot
+            # 3) Update frustration (memory)
+            self._update_frustration()
+
+            # 4) Policy feedback (if enabled)
+            if prev_gdp > 0:
+                gdp_growth_real = (self.gdp - prev_gdp) / prev_gdp
+            else:
+                gdp_growth_real = 0.0
+
+            if adapt_policies:
+                self._adapt_policies(gdp_growth_real)
+
+            # 5) Record snapshot, including current policy settings
             records.append(
                 {
                     "tick": t,
@@ -214,6 +293,11 @@ class World:
                     "stability": float(self.stability),
                     "innovation": float(self.innovation),
                     "emissions": float(self.emissions),
+                    "tax_rate": float(self.config.tax_rate),
+                    "ubi_rate": float(self.config.ubi_rate),
+                    "education_spend": float(self.config.education_spend),
+                    "resource_cap": float(self.config.resource_cap),
+                    "frustration": float(self.frustration),
                 }
             )
 
