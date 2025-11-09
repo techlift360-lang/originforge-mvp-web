@@ -2,66 +2,55 @@
   <img src="assets/originforge-banner.png" alt="OriginForge Banner" width="800"/>
 </p>
 
-# 🌍 OriginForge — Policy Sandbox (Web MVP)
+<p align="center">
+  <a href="https://streamlit.io"><img src="https://img.shields.io/badge/Made%20with-Streamlit-FF4B4B?logo=streamlit" /></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-blue?logo=python" /></a>
+  <a href="https://github.com/techlift360-lang"><img src="https://img.shields.io/badge/By-TechLift360-black?logo=github" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" /></a>
+</p>
 
-Explore how tax, UBI, education, and environmental policies shape a virtual economy through interactive AI-driven simulations.
+# 🌍 OriginForge — AI-Driven Policy Sandbox (Web MVP)
 
-# 🌍 OriginForge — Policy Sandbox
+OriginForge is an **AI-powered civilization simulator** that models how policies—like taxes, UBI, education, and resource caps—shape a virtual economy.  
+It lets you **experiment with societal decisions** and immediately see the effects on GDP, inequality, stability, innovation, and emissions.
 
-**OriginForge** is an interactive policy-simulation sandbox built with **Streamlit**.  
-It lets you experiment with how **tax**, **UBI**, **education**, and **resource policies** influence a virtual society over time —  
-a lightweight, visually rich way to explore macroeconomic trade-offs.
+> _"What if we could predict policy outcomes before implementing them in real life?"_  
+> OriginForge turns that idea into a reality.
 
 ---
 
 ## 🚀 Quick Overview
 
-| | |
-|---|---|
-| **Tech Stack** | Python 3.10+, Streamlit, Plotly, Pandas |
-| **Live Demo** | [▶️ Streamlit App](https://originforge-mvp-web.streamlit.app/) |
-| **Use Case** | Education, experimentation, and scenario analysis |
+| Feature | Description |
+|----------|-------------|
+| 🧠 **Simulated Economy** | 500 autonomous agents (households, firms, and governments) reacting to policy changes. |
+| ⚙️ **Policy Controls** | Adjust tax rates, UBI, education spending, and resource caps in real time. |
+| 📊 **Dynamic Metrics Deck** | Track GDP, inequality, innovation, emissions, and stability over time. |
+| 🔁 **Scenario Comparison** | Run multiple what-if experiments and compare them side-by-side. |
+| 📄 **Export Center** | Generate ready-to-share PDF summaries and CSV datasets. |
+| 🧩 **AI-Ready Core** | Structured to support future world-model and agentic AI integrations. |
 
 ---
 
-## ✨ Features
+## 💡 Why This Is Useful
 
-- **Interactive simulation**
-  - Tune policy levers: tax, UBI, education, and resource caps.
-  - Observe real-time changes in GDP, inequality, innovation, and emissions.
+Traditional policy analysis depends on historical data and human bias.  
+OriginForge provides a **neutral, interactive sandbox** where decisions evolve through agent-based simulation—revealing unintended outcomes before they happen.  
 
-- **Scenario comparison**
-  - Run two policy setups side-by-side to see how outcomes diverge.
-
-- **Smart exports**
-  - Download your results as CSV data or a one-page PDF policy brief.
-  - Export complete JSON payloads for further analysis.
-
-- **Session history**
-  - Keeps your last 10 runs during a session for easy recall.
-
-- **Developer mode**
-  - Inspect internal model data structures in a structured JSON view.
+**Use cases:**
+- Universities teaching economics or sustainability  
+- NGOs exploring policy trade-offs  
+- Governments modeling tax or welfare reform  
+- Corporates running future-of-work or ESG simulations  
 
 ---
 
-## 🧠 Why This Is Useful
+## 🖥️ Run It Locally
 
-Economics and public policy are often abstract.  
-OriginForge makes them *tangible* — it turns policy ideas into visual feedback you can see evolve in seconds.
+Clone the repo and start the Streamlit app.
 
-- 🏫 **Educators** can demonstrate cause–effect relationships interactively.  
-- 🧮 **Researchers** can prototype toy models before running full simulations.  
-- 🧑‍💼 **Policy analysts** can use it as a conversation starter or decision-support sandbox.  
-
----
-
----
-
-<p align="center">
-  <img src="assets/originforge-footer.png" alt="OriginForge Footer" width="800"/>
-</p>
-
-<p align="center">
-  <sub>Built with ❤️ by <strong>TechLift360</strong> • Powered by <a href="https://streamlit.io">Streamlit</a> & AI</sub>
-</p>
+```bash
+git clone https://github.com/techlift360-lang/originforge-mvp-web.git
+cd originforge-mvp-web
+pip install -r requirements.txt
+streamlit run app/main.py
